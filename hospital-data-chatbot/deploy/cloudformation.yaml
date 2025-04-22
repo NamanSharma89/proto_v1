@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Hospital Data Chatbot Infrastructure'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment
+  
+  ModelId:
+    Type: String
+    Default: anthropic.claude-3-sonnet-20240229-v1:0
+    Description: Bedrock model ID to use
+  
+  S3BucketName:
+    Type: String
+    Description: S3 bucket for storing data
+    Default: hospital-data-chatbot
+  
+Resources:
+  # S3 bucket for data storage
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${S3BucketName}-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  
+  # IAM Role for SageMaker
+  SageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+  
+  # Policy for Bedrock access
+  BedrockAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: BedrockAccess
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'bedrock:InvokeModel'
+              - 'bedrock:InvokeModelWithResponseStream'
+            Resource: '*'
+      Roles:
+        - !Ref SageMakerExecutionRole
+  
+  # SageMaker Model
+  SageMakerModel:
+    Type: AWS::SageMaker::Model
+    Properties:
+      ExecutionRoleArn: !GetAtt SageMakerExecutionRole.Arn
+      PrimaryContainer:
+        Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/hospital-chatbot:latest"
+        Environment:
+          BEDROCK_MODEL_ID: !Ref ModelId
+          S3_BUCKET: !Ref DataBucket
+          USE_S3: 'True'
+          AWS_REGION: !Ref AWS::Region
+          ENVIRONMENT: !Ref Environment
+          PORT: '8080'
+          WORKERS_PER_CORE: '1'
+          LOG_LEVEL: 'info'
+  
+  # SageMaker Endpoint Configuration
+  SageMakerEndpointConfig:
+    Type: AWS::SageMaker::EndpointConfig
+    Properties:
+      ProductionVariants:
+        - VariantName: default
+          ModelName: !GetAtt SageMakerModel.ModelName
+          InitialInstanceCount: 1
+          InstanceType: ml.m5.large
+  
+  # SageMaker Endpoint
+  SageMakerEndpoint:
+    Type: AWS::SageMaker::Endpoint
+    Properties:
+      EndpointConfigName: !GetAtt SageMakerEndpointConfig.EndpointConfigName
+  
+  # API Gateway for accessing the endpoint
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: HospitalChatbotAPI
+      Description: API for Hospital Data Chatbot
+  
+  # API Gateway Resource
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: chat
+  
+  # API Gateway Method - Updated for FastAPI
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:sagemaker:path/endpoints/${SageMakerEndpoint}/invocations"
+        IntegrationResponses:
+          - StatusCode: 200
+        RequestTemplates:
+          application/json: '{"query": $input.json("$.query")}'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+  
+  # API Gateway Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: 
+      - ApiMethod
+      - HealthCheckMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: !Ref Environment
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat"
+  
+  SageMakerEndpointName:
+    Description: SageMaker endpoint name
+    Value: !Ref SageMakerEndpoint
+  
+  S3BucketName:
+    Description: S3 bucket for data storage
+    Value: !Ref DataBucket
+
+# Health Check Resource
+HealthCheckResource:
+  Type: AWS::ApiGateway::Resource
+  Properties:
+    RestApiId: !Ref ApiGateway
+    ParentId: !GetAtt ApiGateway.RootResourceId
+    PathPart: health
+
+# Health Check Method
+HealthCheckMethod:
+  Type: AWS::ApiGateway::Method
+  Properties:
+    RestApiId: !Ref ApiGateway
+    ResourceId: !Ref HealthCheckResource
+    HttpMethod: GET
+    AuthorizationType: NONE
+    Integration:
+      Type: AWS
+      IntegrationHttpMethod: GET
+      Uri: !Sub "arn:aws:apigateway:${AWS::Region}:sagemaker:path/endpoints/${SageMakerEndpoint}/invocations"
+      IntegrationResponses:
+        - StatusCode: 200
+      RequestTemplates:
+        application/json: '{"healthCheck": true}'
+    MethodResponses:
+      - StatusCode: 200

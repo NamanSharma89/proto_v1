@@ -1,0 +1,7 @@
+version = 1
+
+[tool]
+python-version = "3.9"
+
+[env]
+requirements-dev = ".[dev]"
