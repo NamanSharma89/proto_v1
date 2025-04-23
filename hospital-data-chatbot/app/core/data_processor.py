@@ -190,15 +190,16 @@ class DataProcessor:
             self.logger.error(f"Error loading diagnosis data: {str(e)}", exc_info=True)
             raise
     
-    def _convert_column_names_to_snake_case(self, df: pl.DataFrame) -> pl.DataFrame:
+    def _convert_column_names_to_snake_case(self, df):
         """
         Convert column names to snake_case and validate no duplicates are created.
+        Removes leading numbers from column names.
         
         Args:
             df: Polars DataFrame with original column names
             
         Returns:
-            DataFrame with snake_case column names
+            DataFrame with sanitized snake_case column names
         """
         # Create a mapping of original names to snake_case names
         column_mapping = {}
@@ -216,6 +217,13 @@ class DataProcessor:
             
             # 3. Convert to lowercase and remove any double underscores
             snake_col = snake_col.lower().replace('__', '_').strip('_')
+            
+            # 4. Remove leading digits (e.g. "1_hospital_id" -> "hospital_id")
+            snake_col = re.sub(r'^[0-9]+_*', '', snake_col)
+            
+            # 5. If removing digits results in an empty string or just underscores, use "column_X"
+            if not snake_col or snake_col.strip('_') == '':
+                snake_col = f"column_{df.columns.index(col)}"
             
             column_mapping[col] = snake_col
         

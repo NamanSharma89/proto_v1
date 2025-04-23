@@ -3,11 +3,35 @@ import psycopg2
 import polars as pl
 from psycopg2.extras import execute_values
 from app.config.settings import AppConfig
-from app.utils.logging import get_logger 
+from app.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+def _get_pg_type(polars_type):
+    """Map Polars data types to PostgreSQL data types."""
+    type_map = {
+        pl.Int8: "SMALLINT",
+        pl.Int16: "SMALLINT",
+        pl.Int32: "INTEGER",
+        pl.Int64: "BIGINT",
+        pl.UInt8: "SMALLINT",
+        pl.UInt16: "INTEGER",
+        pl.UInt32: "BIGINT",
+        pl.UInt64: "BIGINT",
+        pl.Float32: "REAL",
+        pl.Float64: "DOUBLE PRECISION",
+        pl.Boolean: "BOOLEAN",
+        pl.Utf8: "TEXT",
+        pl.Date: "DATE",
+        pl.Datetime: "TIMESTAMP",
+        pl.Time: "TIME",
+    }
+    
+    # Default to TEXT if type not found
+    return type_map.get(polars_type, "TEXT")
 
 def get_db_connection():
-    """Get a connection to the Aurora PostgreSQL database."""
-    logger = get_logger(__name__)
+    """Get a connection to the PostgreSQL database."""
     try:
         logger.debug(f"Creating database connection to {AppConfig.DB_HOST}:{AppConfig.DB_PORT}/{AppConfig.DB_NAME}")
         conn = psycopg2.connect(
@@ -15,9 +39,18 @@ def get_db_connection():
             database=AppConfig.DB_NAME,
             user=AppConfig.DB_USER,
             password=AppConfig.DB_PASSWORD,
-            port=AppConfig.DB_PORT
+            port=AppConfig.DB_PORT,
+            # Set search path to explicitly use public schema
+            options="-c search_path=public"
         )
         logger.debug("Database connection established successfully")
+        
+        # Ensure the search path is set to public
+        cursor = conn.cursor()
+        cursor.execute("SET search_path TO public;")
+        conn.commit()
+        cursor.close()
+        
         return conn
     except Exception as e:
         logger.error(f"Failed to connect to database: {str(e)}", exc_info=True)
@@ -25,9 +58,6 @@ def get_db_connection():
 
 def create_tables(conn, patient_df, diagnosis_df):
     """Create tables for patient data and diagnosis data with appropriate relationships."""
-    logger = get_logger(__name__)
-    
-    # Create patient table
     logger.debug("Creating patient_details table")
     create_dynamic_table(conn, "patient_details", patient_df)
     logger.debug("patient_details table created or already exists")
@@ -46,7 +76,8 @@ def create_tables(conn, patient_df, diagnosis_df):
         cursor.execute("""
         SELECT COUNT(*) FROM information_schema.table_constraints 
         WHERE constraint_name = 'fk_diagnosis_patient' 
-        AND table_name = 'diagnosis_details';
+        AND table_name = 'diagnosis_details'
+        AND table_schema = 'public';
         """)
         
         constraint_exists = cursor.fetchone()[0] > 0
@@ -56,10 +87,10 @@ def create_tables(conn, patient_df, diagnosis_df):
             # Add foreign key constraint
             logger.debug("Adding foreign key constraint")
             cursor.execute("""
-            ALTER TABLE diagnosis_details 
+            ALTER TABLE public.diagnosis_details 
             ADD CONSTRAINT fk_diagnosis_patient 
             FOREIGN KEY (registry_id) 
-            REFERENCES patient_details (registry_id);
+            REFERENCES public.patient_details (registry_id);
             """)
             logger.debug("Foreign key constraint added successfully")
         
@@ -75,19 +106,18 @@ def create_dynamic_table(conn, table_name, df):
     """
     Dynamically create a table based on DataFrame schema.
     """
-    logger = get_logger(__name__)
     cursor = conn.cursor()
     
     try:
-        # Start building SQL statement
-        create_table_sql = f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
+        # Start building SQL statement with schema explicitly defined
+        create_table_sql = f"CREATE TABLE IF NOT EXISTS public.{table_name} (\n"
         create_table_sql += "    id SERIAL PRIMARY KEY,\n"
         
         # Add columns based on DataFrame schema
         for col_name, dtype in df.schema.items():
             # Convert column name to snake_case if not already
             col_name_snake = col_name.lower()
-            pg_type = _get_pg_type(dtype)
+            pg_type = _get_pg_type(dtype)  # This is the line causing the error - make sure _get_pg_type is defined above
             create_table_sql += f"    {col_name_snake} {pg_type},\n"
         
         # Add created_at timestamp
@@ -101,6 +131,19 @@ def create_dynamic_table(conn, table_name, df):
         cursor.execute(create_table_sql)
         conn.commit()
         logger.debug(f"Table {table_name} created or already exists")
+        
+        # Verify table was created
+        cursor.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = %s
+        );
+        """, (table_name,))
+        
+        exists = cursor.fetchone()[0]
+        logger.debug(f"Table verification - {table_name} exists: {exists}")
+        
     except Exception as e:
         logger.error(f"Error creating table {table_name}: {str(e)}", exc_info=True)
         raise
@@ -109,22 +152,21 @@ def create_dynamic_table(conn, table_name, df):
 
 def insert_data(conn, table_name, df):
     """Insert data into a table."""
-    logger = get_logger(__name__)
     cursor = conn.cursor()
     
     try:
         # Get column names from the dataframe
         columns = df.columns
-        logger.debug(f"Inserting data into {table_name} with columns: {columns}")
+        logger.debug(f"Inserting data into public.{table_name} with columns: {columns}")
         
         # Prepare SQL statement
         placeholders = ', '.join(['%s'] * len(columns))
-        sql = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
+        sql = f"INSERT INTO public.{table_name} ({', '.join(columns)}) VALUES ({placeholders})"
         
         # Convert Polars DataFrame to list of tuples
         values = [tuple(row) for row in df.to_numpy()]
         
-        logger.debug(f"Inserting {len(values)} rows into {table_name}")
+        logger.debug(f"Inserting {len(values)} rows into public.{table_name}")
         if len(values) > 0:
             logger.debug(f"Sample row: {values[0]}")
         
@@ -133,12 +175,12 @@ def insert_data(conn, table_name, df):
             execute_values(cursor, sql, values)
             logger.debug(f"Data insertion completed, {len(values)} rows affected")
         else:
-            logger.warning(f"No data to insert into {table_name}")
+            logger.warning(f"No data to insert into public.{table_name}")
         
         conn.commit()
         return len(values)
     except Exception as e:
-        logger.error(f"Error inserting data into {table_name}: {str(e)}", exc_info=True)
+        logger.error(f"Error inserting data into public.{table_name}: {str(e)}", exc_info=True)
         raise
     finally:
         cursor.close()
