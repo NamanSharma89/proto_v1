@@ -8,18 +8,11 @@ from app.config.settings import AppConfig
 def setup_logging(log_level=None, log_to_file=True):
     """
     Set up application logging.
-    
-    Args:
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_to_file: Whether to log to a file in addition to console
-    
-    Returns:
-        Logger instance for the application
     """
     # Get log level from config if not provided
     if log_level is None:
-        log_level_str = getattr(AppConfig, 'LOG_LEVEL', 'INFO')
-        log_level = getattr(logging, log_level_str, logging.INFO)
+        log_level_str = getattr(AppConfig, 'LOG_LEVEL', 'DEBUG')  # Set default to DEBUG for troubleshooting
+        log_level = getattr(logging, log_level_str, logging.DEBUG)
     
     # Create logger
     logger = logging.getLogger('hospital_chatbot')
@@ -29,9 +22,9 @@ def setup_logging(log_level=None, log_to_file=True):
     if logger.handlers:
         logger.handlers = []
     
-    # Create formatter
+    # Create formatter with more details
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s - %(message)s'
     )
     
     # Create console handler
@@ -58,6 +51,7 @@ def setup_logging(log_level=None, log_to_file=True):
     
     # Log startup message
     logger.info("Logging initialized")
+    logger.debug("Debug logging enabled")
     
     return logger
 
