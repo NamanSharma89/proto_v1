@@ -38,11 +38,6 @@ The system consists of:
 ./setup_uv.sh
 ```
 
-#### Windows
-```
-setup_uv.bat
-```
-
 ### Traditional Setup
 
 ```bash

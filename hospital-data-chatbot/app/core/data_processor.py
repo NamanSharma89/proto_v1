@@ -25,7 +25,7 @@ class DataProcessor:
 
     logger = get_logger(__name__)
     
-    def __init__(self, auto_load: bool = True, auto_ingest_db: bool = True):
+    def __init__(self, auto_load: bool = True, auto_ingest_db: bool = False):
         """
         Initialize the data processor.
         
@@ -44,7 +44,15 @@ class DataProcessor:
             "load_timestamp": None,
             "processing_time_sec": 0,
             "data_quality": {},
+            "environment": AppConfig.get_environment_name(),
         }
+        
+        self.logger.info(f"DataProcessor initialized in {AppConfig.get_environment_name()} environment")
+        
+        # In production, always load but don't auto-ingest to allow validation
+        if AppConfig.is_production():
+            self.logger.info("Production environment detected: Auto-ingest disabled for safety")
+            auto_ingest_db = False
         
         if auto_load:
             self.load_data()

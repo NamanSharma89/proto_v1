@@ -4,9 +4,9 @@ Description: 'Hospital Data Chatbot Infrastructure'
 Parameters:
   Environment:
     Type: String
-    Default: dev
-    AllowedValues: [dev, staging, prod]
-    Description: Deployment environment
+    Default: dev_cloud
+    AllowedValues: [dev_cloud, stage, prod]
+    Description: Deployment environment profile
   
   ModelId:
     Type: String
@@ -18,6 +18,11 @@ Parameters:
     Description: S3 bucket for storing data
     Default: hospital-data-chatbot
   
+  DatabasePassword:
+    Type: String
+    Description: Password for the database (will be stored in Secrets Manager)
+    NoEcho: true
+
 Resources:
   # S3 bucket for data storage
   DataBucket:
@@ -30,6 +35,14 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+  
+  # Secret for database credentials
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "hospital-chatbot/${Environment}/db-credentials"
+      Description: Database credentials for Hospital Chatbot
+      SecretString: !Sub '{"username": "${Environment}_user", "password": "${DatabasePassword}"}'
   
   # IAM Role for SageMaker
   SageMakerExecutionRole:
@@ -45,7 +58,7 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
         - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
-  
+      
   # Policy for Bedrock access
   BedrockAccessPolicy:
     Type: AWS::IAM::Policy
@@ -59,6 +72,10 @@ Resources:
               - 'bedrock:InvokeModel'
               - 'bedrock:InvokeModelWithResponseStream'
             Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'secretsmanager:GetSecretValue'
+            Resource: !Ref DatabaseSecret
       Roles:
         - !Ref SageMakerExecutionRole
   
@@ -70,14 +87,16 @@ Resources:
       PrimaryContainer:
         Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/hospital-chatbot:latest"
         Environment:
+          APP_ENV: !Ref Environment
           BEDROCK_MODEL_ID: !Ref ModelId
           S3_BUCKET: !Ref DataBucket
           USE_S3: 'True'
           AWS_REGION: !Ref AWS::Region
-          ENVIRONMENT: !Ref Environment
+          DB_SECRET_ARN: !Ref DatabaseSecret
           PORT: '8080'
           WORKERS_PER_CORE: '1'
-          LOG_LEVEL: 'info'
+          LOG_LEVEL: !If [IsProd, 'WARNING', !If [IsStage, 'INFO', 'DEBUG']]
+          API_KEY_REQUIRED: 'True'
   
   # SageMaker Endpoint Configuration
   SageMakerEndpointConfig:
@@ -86,8 +105,8 @@ Resources:
       ProductionVariants:
         - VariantName: default
           ModelName: !GetAtt SageMakerModel.ModelName
-          InitialInstanceCount: 1
-          InstanceType: ml.m5.large
+          InitialInstanceCount: !If [IsProd, 2, 1]
+          InstanceType: !If [IsProd, 'ml.m5.xlarge', 'ml.m5.large']
   
   # SageMaker Endpoint
   SageMakerEndpoint:
@@ -99,8 +118,8 @@ Resources:
   ApiGateway:
     Type: AWS::ApiGateway::RestApi
     Properties:
-      Name: HospitalChatbotAPI
-      Description: API for Hospital Data Chatbot
+      Name: !Sub "HospitalChatbotAPI-${Environment}"
+      Description: !Sub "API for Hospital Data Chatbot (${Environment})"
   
   # API Gateway Resource
   ApiResource:
@@ -117,7 +136,8 @@ Resources:
       RestApiId: !Ref ApiGateway
       ResourceId: !Ref ApiResource
       HttpMethod: POST
-      AuthorizationType: NONE
+      AuthorizationType: !If [IsProd, 'API_KEY', 'NONE']
+      ApiKeyRequired: !If [IsProd, true, false]
       Integration:
         Type: AWS
         IntegrationHttpMethod: POST
@@ -142,6 +162,10 @@ Resources:
       RestApiId: !Ref ApiGateway
       StageName: !Ref Environment
 
+Conditions:
+  IsProd: !Equals [!Ref Environment, 'prod']
+  IsStage: !Equals [!Ref Environment, 'stage']
+
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
@@ -154,6 +178,10 @@ Outputs:
   S3BucketName:
     Description: S3 bucket for data storage
     Value: !Ref DataBucket
+  
+  Environment:
+    Description: Deployment environment
+    Value: !Ref Environment
 
 # Health Check Resource
 HealthCheckResource:

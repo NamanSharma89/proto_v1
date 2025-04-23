@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from app.config import AppConfig
 
 router = APIRouter()
 
@@ -9,12 +10,28 @@ class ChatQuery(BaseModel):
 @router.get("/health")
 async def health_check():
     """API health check endpoint."""
-    return {"status": "healthy", "message": "API is operational"}
+    return {
+        "status": "healthy", 
+        "message": "API is operational",
+        "environment": AppConfig.get_environment_name(),
+        "debug_mode": AppConfig.DEBUG
+    }
 
 @router.get("/data/stats")
 async def data_stats(request: Request):
     """Get statistics about the loaded data."""
     stats = request.app.state.data_processor.get_data_stats()
+    
+    # In non-production environments, include more detailed information
+    if AppConfig.is_development():
+        # Include debug information
+        stats["environment"] = AppConfig.get_environment_name()
+        stats["app_config"] = {
+            "db_host": AppConfig.DB_HOST,
+            "s3_enabled": AppConfig.USE_S3,
+            "s3_bucket": AppConfig.S3_BUCKET if AppConfig.USE_S3 else None,
+        }
+    
     return stats
 
 # app/api/routes.py
