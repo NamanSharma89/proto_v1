@@ -8,17 +8,17 @@ class AppConfig:
     # Environment selection
     ENV = os.getenv('APP_ENV', 'dev_local')  # Options: dev_local, dev_cloud, stage, prod
     
-    # Base configurations
-    DEBUG = os.getenv('DEBUG', 'True') == 'True'
-    PORT = os.getenv('PORT', '8080')
-    
-    # Data settings
-    DATA_DIR = os.getenv('DATA_DIR', 'data')
+    # Basic settings without defaults that would override env-specific configs
+    DEBUG = os.getenv('DEBUG') == 'True' if os.getenv('DEBUG') else None
+    PORT = os.getenv('PORT')
+    DATA_DIR = os.getenv('DATA_DIR')
     
     # Environment-specific configurations
     _env_configs: Dict[str, Dict[str, Any]] = {
         'dev_local': {
             'DEBUG': True,
+            'PORT': '8080',
+            'DATA_DIR': 'data',
             'DB_HOST': 'localhost',
             'DB_PORT': 5432,
             'DB_NAME': 'hospital_data_test',
@@ -31,6 +31,8 @@ class AppConfig:
         },
         'dev_cloud': {
             'DEBUG': True,
+            'PORT': '8080',
+            'DATA_DIR': 'data',
             'DB_HOST': 'dev-aurora-cluster.cluster-xyz.us-east-1.rds.amazonaws.com',
             'DB_PORT': 5432,
             'DB_NAME': 'hospital_data_dev',
@@ -44,11 +46,13 @@ class AppConfig:
         },
         'stage': {
             'DEBUG': False,
+            'PORT': '8080',
+            'DATA_DIR': 'data',
             'DB_HOST': 'stage-aurora-cluster.cluster-xyz.us-east-1.rds.amazonaws.com',
             'DB_PORT': 5432,
             'DB_NAME': 'hospital_data_stage',
             'DB_USER': 'stage_user',
-            'DB_PASSWORD': os.getenv('STAGE_DB_PASSWORD', None),
+            'DB_PASSWORD': os.getenv('STAGE_DB_PASSWORD', 'stage_password'),
             'USE_S3': True,
             'S3_BUCKET': 'hospital-data-chatbot-stage',
             'AWS_REGION': 'us-east-1',
@@ -57,11 +61,13 @@ class AppConfig:
         },
         'prod': {
             'DEBUG': False,
+            'PORT': '8080',
+            'DATA_DIR': 'data',
             'DB_HOST': 'prod-aurora-cluster.cluster-xyz.us-east-1.rds.amazonaws.com',
             'DB_PORT': 5432,
             'DB_NAME': 'hospital_data_prod',
             'DB_USER': 'prod_user',
-            'DB_PASSWORD': os.getenv('PROD_DB_PASSWORD', None),
+            'DB_PASSWORD': os.getenv('PROD_DB_PASSWORD', 'change_this_in_prod'),
             'USE_S3': True,
             'S3_BUCKET': 'hospital-data-chatbot-prod',
             'AWS_REGION': 'us-east-1',
@@ -70,29 +76,24 @@ class AppConfig:
         }
     }
     
-    # Apply environment-specific settings
+    # Apply environment-specific settings - first set defaults
     env_config = _env_configs.get(ENV, _env_configs['dev_local'])
     
-    # Override base settings with environment-specific ones
+    # Now apply the environment config
     for key, value in env_config.items():
-        # Only set if not explicitly defined in environment variables
-        if key != 'ENV' and not os.getenv(key):
-            locals()[key] = value
+        locals()[key] = value
     
-    # AWS settings (may be overridden by env-specific settings)
-    AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-    USE_S3 = os.getenv('USE_S3', 'False') == 'True'
-    S3_BUCKET = os.getenv('S3_BUCKET', 'hospital-data-chatbot')
-    
-    # Database settings (may be overridden by env-specific settings)
-    DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = int(os.getenv('DB_PORT', '5432'))
-    DB_NAME = os.getenv('DB_NAME', 'hospital_data')
-    DB_USER = os.getenv('DB_USER', 'postgres')
-    DB_PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
-    
-    # Logging level
-    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    # Override with environment variables if they exist
+    for key in env_config.keys():
+        env_value = os.getenv(key)
+        if env_value is not None:
+            # Handle special cases for type conversion
+            if key == 'DEBUG' or key == 'USE_S3' or key == 'API_KEY_REQUIRED':
+                locals()[key] = env_value.lower() == 'true'
+            elif key == 'DB_PORT':
+                locals()[key] = int(env_value)
+            else:
+                locals()[key] = env_value
     
     # Bedrock settings
     BEDROCK_MODEL_ID = os.getenv(
@@ -100,8 +101,7 @@ class AppConfig:
         'anthropic.claude-3-sonnet-20240229-v1:0'
     )
     
-    # Security settings
-    API_KEY_REQUIRED = os.getenv('API_KEY_REQUIRED', 'True') == 'True'
+    # Security settings - ensure API_KEY is always from env var if provided
     API_KEY = os.getenv('API_KEY', 'default_dev_key')  # Change in production!
     
     @classmethod
