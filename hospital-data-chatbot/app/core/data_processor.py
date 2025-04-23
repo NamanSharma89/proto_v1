@@ -25,7 +25,7 @@ class DataProcessor:
 
     logger = get_logger(__name__)
     
-    def __init__(self, auto_load: bool = True, auto_ingest_db: bool = False):
+    def __init__(self, auto_load: bool = True, auto_ingest_db: bool = True):
         """
         Initialize the data processor.
         

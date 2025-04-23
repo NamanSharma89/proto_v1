@@ -3,6 +3,7 @@ import psycopg2
 import polars as pl
 from psycopg2.extras import execute_values
 from app.config.settings import AppConfig
+from app.utils.logging import get_logger 
 
 def get_db_connection():
     """Get a connection to the Aurora PostgreSQL database."""
