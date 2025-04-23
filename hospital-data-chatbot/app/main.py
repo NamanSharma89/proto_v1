@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from app.api.routes import router as api_router
 from app.core.data_processor import DataProcessor
+from app.utils.logging import setup_logging
+from fastapi.middleware.cors import CORSMiddleware
 
 def create_app():
     """Create and configure the FastAPI application."""
@@ -16,6 +18,19 @@ def create_app():
     
     # Include API routes
     app.include_router(api_router, prefix="/api")
+
+    # Set up logging
+    logger = setup_logging(log_to_file=True)
+    logger.info("FastAPI application started")
+
+    # Middleware for CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins for CORS
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     
     return app
 

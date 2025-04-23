@@ -1,5 +1,5 @@
 # app/core/db_importer.py
-from app.utils.db import get_db_connection, create_tables, insert_data
+from app.utils.db import get_db_connection, create_tables, insert_patient_data, insert_metadata
 
 class DbImporter:
     """Handles importing data to Aurora PostgreSQL."""
@@ -7,22 +7,22 @@ class DbImporter:
     def __init__(self):
         self.conn = get_db_connection()
         
-    def setup_database(self, patient_data, diagnosis_data):
-        """Set up database tables with proper relationships."""
-        create_tables(self.conn, patient_data, diagnosis_data)
+    def setup_database(self):
+        """Set up database tables."""
+        create_tables(self.conn)
     
-    def import_data(self, patient_data, diagnosis_data):
-        """Import both patient and diagnosis data into the database."""
+    def import_data(self, patient_data, metadata):
+        """Import both patient data and metadata into the database."""
         # Create tables if they don't exist
-        self.setup_database(patient_data, diagnosis_data)
+        self.setup_database()
         
         # Import data
-        patient_count = insert_data(self.conn, "patient_details", patient_data)
-        diagnosis_count = insert_data(self.conn, "diagnosis_details", diagnosis_data)
+        patient_count = insert_patient_data(self.conn, patient_data)
+        metadata_count = insert_metadata(self.conn, metadata)
         
         return {
             'patient_records': patient_count,
-            'diagnosis_records': diagnosis_count
+            'metadata_records': metadata_count
         }
         
     def close(self):
