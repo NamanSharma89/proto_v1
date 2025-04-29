@@ -5,7 +5,6 @@ from app.utils.logging import setup_logging
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import AppConfig
 
-
 def create_app():
     """Create and configure the FastAPI application."""
     app = FastAPI(
@@ -37,7 +36,11 @@ def create_app():
     # Apply environment-specific configurations
     if AppConfig.is_development():
         logger.debug("Development-specific configuration applied")
-        # Development-only settings
+        
+        # Add development routes if in development environment
+        from app.api.dev_routes import router as dev_router
+        app.include_router(dev_router, prefix="/dev")
+        logger.debug("Development routes added")
     else:
         # Production & staging settings
         logger.info("Production/Staging configuration applied")

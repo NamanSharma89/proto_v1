@@ -25,17 +25,27 @@ class DataProcessor:
 
     logger = get_logger(__name__)
     
-    def __init__(self, auto_load: bool = True, auto_ingest_db: bool = False):
+    def __init__(self, auto_load: bool = True, auto_ingest_db: bool = False, recreate_db_schema: bool = False):
         """
         Initialize the data processor.
         
         Args:
             auto_load: Automatically load data during initialization
             auto_ingest_db: Automatically ingest data into database after loading
+            recreate_db_schema: Drop and recreate database schema (development mode only)
         """
         self.patient_data = None
         self.diagnosis_data = None
         self.data_path = Path(AppConfig.DATA_DIR) / 'raw' / 'hospital_data.xlsx'
+        self.recreate_db_schema = recreate_db_schema
+        
+        # Safety check - only allow schema recreation in development environments
+        if self.recreate_db_schema and not AppConfig.is_development():
+            self.logger.warning("Schema recreation requested but not allowed in non-development environment")
+            self.recreate_db_schema = False
+            
+        if self.recreate_db_schema:
+            self.logger.warning("Database schema will be dropped and recreated! Use this only in development.")
         
         # Track data stats for monitoring
         self.stats = {
@@ -53,6 +63,7 @@ class DataProcessor:
         if AppConfig.is_production():
             self.logger.info("Production environment detected: Auto-ingest disabled for safety")
             auto_ingest_db = False
+            self.recreate_db_schema = False
         
         if auto_load:
             self.load_data()
@@ -193,7 +204,7 @@ class DataProcessor:
     def _convert_column_names_to_snake_case(self, df):
         """
         Convert column names to snake_case and validate no duplicates are created.
-        Removes leading numbers from column names.
+        Handles decimal numbers in column names and removes leading numbers.
         
         Args:
             df: Polars DataFrame with original column names
@@ -205,10 +216,9 @@ class DataProcessor:
         column_mapping = {}
         
         for col in df.columns:
-            # Clean the column name to keep only alphanumeric characters and spaces
-            clean_col = ''.join(c if c.isalnum() or c.isspace() else ' ' for c in col)
+            # Clean the column name to keep only alphanumeric characters, spaces, and periods
+            clean_col = ''.join(c if c.isalnum() or c.isspace() or c == '.' else ' ' for c in col)
             
-            # Convert spaces, hyphens and camelCase to snake_case
             # 1. Replace spaces and hyphens with underscores
             snake_col = clean_col.replace(' ', '_').replace('-', '_')
             
@@ -218,10 +228,15 @@ class DataProcessor:
             # 3. Convert to lowercase and remove any double underscores
             snake_col = snake_col.lower().replace('__', '_').strip('_')
             
-            # 4. Remove leading digits (e.g. "1_hospital_id" -> "hospital_id")
-            snake_col = re.sub(r'^[0-9]+_*', '', snake_col)
+            # 4. Remove decimal number prefixes with any number of decimal points 
+            # (e.g., "5.1.2_retriage" -> "retriage", "5.1_retriage" -> "retriage")
+            # This pattern removes floating point numbers at the beginning of column names
+            snake_col = re.sub(r'^(\d+(\.\d+)+)[\._]*', '', snake_col)
             
-            # 5. If removing digits results in an empty string or just underscores, use "column_X"
+            # 5. Remove any remaining leading digits (e.g. "1_hospital_id" -> "hospital_id")
+            snake_col = re.sub(r'^[0-9]+[\._]*', '', snake_col)
+            
+            # 6. If removing digits results in an empty string or just underscores, use "column_X"
             if not snake_col or snake_col.strip('_') == '':
                 snake_col = f"column_{df.columns.index(col)}"
             
@@ -372,16 +387,16 @@ class DataProcessor:
     
     def ingest_to_database(self) -> Dict[str, Any]:
         """
-        Ingest processed data into the database.
+        Ingest processed data into the database with enhanced validation.
         
         Returns:
-            Dictionary with ingestion results
+            Dictionary with ingestion results including validation statistics
         """
         if self.patient_data is None or self.diagnosis_data is None:
             raise ValueError("No data available for ingestion - load data first")
         
         try:
-            self.logger.info("Starting database ingestion process")
+            self.logger.info("Starting database ingestion process with validation")
             self.logger.debug(f"Connection details: host={AppConfig.DB_HOST}, port={AppConfig.DB_PORT}, db={AppConfig.DB_NAME}")
             
             # Log data shape before ingestion
@@ -393,32 +408,65 @@ class DataProcessor:
             try:
                 # Create database tables if they don't exist
                 self.logger.info("Creating database tables if they don't exist")
-                create_tables(conn, self.patient_data, self.diagnosis_data)
+                create_tables(conn, self.patient_data, self.diagnosis_data, drop_if_exists=getattr(self, 'recreate_db_schema', False))
                 
                 # Insert patient data first (for referential integrity)
-                self.logger.info(f"Inserting {self.patient_data.height} patient records")
-                patient_count = insert_data(conn, "patient_details", self.patient_data)
+                self.logger.info(f"Validating and inserting {self.patient_data.height} patient records")
+                patient_stats = insert_data(conn, "patient_details", self.patient_data)
                 
                 # Insert diagnosis data linked to patients
-                self.logger.info(f"Inserting {self.diagnosis_data.height} diagnosis records")
-                diagnosis_count = insert_data(conn, "diagnosis_details", self.diagnosis_data)
+                self.logger.info(f"Validating and inserting {self.diagnosis_data.height} diagnosis records")
+                diagnosis_stats = insert_data(conn, "diagnosis_details", self.diagnosis_data)
                 
                 # Commit transaction
                 conn.commit()
                 self.logger.info("Transaction committed successfully")
                 
+                # Compile and log comprehensive statistics
+                success_rate_patients = (patient_stats["valid_records"] / patient_stats["total_records"]) * 100 if patient_stats["total_records"] > 0 else 0
+                success_rate_diagnosis = (diagnosis_stats["valid_records"] / diagnosis_stats["total_records"]) * 100 if diagnosis_stats["total_records"] > 0 else 0
+                
+                self.logger.info(f"Patient data: {patient_stats['valid_records']} inserted, {patient_stats['rejected_records']} rejected ({success_rate_patients:.1f}% success)")
+                self.logger.info(f"Diagnosis data: {diagnosis_stats['valid_records']} inserted, {diagnosis_stats['rejected_records']} rejected ({success_rate_diagnosis:.1f}% success)")
+                
+                # If there were rejected records, log the main reasons
+                if patient_stats["rejected_records"] > 0:
+                    self.logger.warning("Main reasons for patient data rejection:")
+                    for reason, count in sorted(patient_stats.get("error_reasons", {}).items(), key=lambda x: x[1], reverse=True)[:3]:
+                        self.logger.warning(f" - {reason}: {count} records")
+                
+                if diagnosis_stats["rejected_records"] > 0:
+                    self.logger.warning("Main reasons for diagnosis data rejection:")
+                    for reason, count in sorted(diagnosis_stats.get("error_reasons", {}).items(), key=lambda x: x[1], reverse=True)[:3]:
+                        self.logger.warning(f" - {reason}: {count} records")
+                
                 # Return insertion results
                 result = {
                     "status": "success",
-                    "patient_records_inserted": patient_count,
-                    "diagnosis_records_inserted": diagnosis_count,
-                    "timestamp": datetime.now().isoformat()
+                    "patient_records": {
+                        "total": patient_stats["total_records"],
+                        "inserted": patient_stats["valid_records"],
+                        "rejected": patient_stats["rejected_records"],
+                        "success_rate": f"{success_rate_patients:.1f}%"
+                    },
+                    "diagnosis_records": {
+                        "total": diagnosis_stats["total_records"],
+                        "inserted": diagnosis_stats["valid_records"],
+                        "rejected": diagnosis_stats["rejected_records"],
+                        "success_rate": f"{success_rate_diagnosis:.1f}%"
+                    },
+                    "validation_details": {
+                        "patient_errors": patient_stats.get("error_reasons", {}),
+                        "diagnosis_errors": diagnosis_stats.get("error_reasons", {})
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "schema_recreated": getattr(self, 'recreate_db_schema', False)
                 }
                 
                 # Update stats
                 self.stats["db_ingestion"] = result
                 
-                self.logger.info(f"Database ingestion complete: {patient_count} patients, {diagnosis_count} diagnoses")
+                self.logger.info(f"Database ingestion complete with validation")
                 return result
                 
             except Exception as e:
