@@ -15,16 +15,25 @@ This application provides an intelligent chatbot interface for hospital staff to
 
 - 🔍 Natural language query interface for hospital data analysis
 - 📊 Accurate statistical calculations on patient metrics
+- 🧹 Advanced data sanitization for cleaning special characters and formatting
 - 🔄 Automated nightly data processing pipeline
 - 📝 PostgreSQL database integration with proper table relationships
 - 🧠 AWS Bedrock integration for advanced language understanding
 - 🚀 FastAPI framework for high-performance API endpoints
 
+## ✨ Recent Enhancements
+
+- **Robust Data Sanitization**: Added comprehensive data cleaning to remove special characters, normalize whitespace, and ensure consistent formatting
+- **Improved Type Safety**: Enhanced validation with consistent string-based comparisons for IDs and other fields
+- **Better Error Handling**: Added multiple fallback mechanisms for Excel loading and data processing
+- **Enhanced Validation**: Added detailed data quality checks with comprehensive reporting
+- **Type Validation**: New validation for data types in both patient and diagnosis records
+
 ## 🛠️ Architecture
 
 The system consists of:
 
-1. **Data Processing Layer**: Extract data from Excel and store in a queryable format
+1. **Data Processing Layer**: Extract and sanitize data from Excel and store in a queryable format
 2. **Model Layer**: AWS Bedrock for LLM access
 3. **Business Logic Layer**: Python application to handle queries and calculations
 4. **Deployment Layer**: AWS infrastructure for hosting
@@ -107,6 +116,26 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM
 ```
 
+## 📚 Data Processing Features
+
+### Data Sanitization
+
+The application includes advanced data sanitization features:
+
+- **Column-Specific Rules**: Different sanitization rules for IDs, names, and medical terminology
+- **Special Character Handling**: Removes unwanted special characters while preserving important punctuation
+- **Whitespace Normalization**: Trims extra spaces and standardizes formatting
+- **Detailed Reporting**: Tracks modified cells and provides sanitization statistics
+
+### Data Validation
+
+Comprehensive data validation ensures data integrity:
+
+- **Orphaned Record Detection**: Identifies diagnosis records without matching patients
+- **Duplicate Detection**: Finds duplicate patient IDs with consistent type handling
+- **Type Validation**: Validates numeric fields, dates, and categorical values
+- **Missing Value Detection**: Identifies records with missing critical information
+
 ## 🔒 AWS Security Configuration
 
 ### IAM Roles
@@ -131,8 +160,13 @@ hospital-data-chatbot/
 │   ├── api/                     # API endpoints
 │   ├── config/                  # Configuration
 │   ├── core/                    # Core logic
+│   │   ├── data_processor.py    # Enhanced data processing and sanitization
+│   │   ├── llm_connector.py     # AWS Bedrock LLM interface
+│   │   └── query_engine.py      # Natural language query processing
 │   ├── models/                  # Data models
 │   └── utils/                   # Utilities
+│       ├── db.py                # Database utilities
+│       └── calculation_handler.py # Statistical calculation handling
 │
 ├── data/                        # Data files
 │   ├── raw/                     # Original data
@@ -160,6 +194,7 @@ hospital-data-chatbot/
 - 🔐 Add Authentication: Secure the API with proper user authentication
 - 📊 Enhanced Visualizations: Add graphical representation of query results
 - 🔄 Real-time Data Updates: Support for real-time data updates beyond nightly batch processing
+- 🧪 Comprehensive Test Suite: Add unit and integration tests for all components
 
 ## 📝 License
 
