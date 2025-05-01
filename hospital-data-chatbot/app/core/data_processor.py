@@ -1,3 +1,4 @@
+# app/core/data_processor.py
 import os
 import re
 import polars as pl
@@ -17,6 +18,7 @@ class DataProcessor:
     Enhanced data processor that handles loading, processing, and storing hospital data.
     Features:
     - Robust data loading from Excel with better error handling
+    - Data sanitization for removing special characters and unwanted spaces
     - Efficient data type conversion and schema management
     - Parallel processing capabilities
     - Direct database ingestion
@@ -55,6 +57,7 @@ class DataProcessor:
             "processing_time_sec": 0,
             "data_quality": {},
             "environment": AppConfig.get_environment_name(),
+            "sanitization_stats": {}  # New field to track sanitization changes
         }
         
         self.logger.info(f"DataProcessor initialized in {AppConfig.get_environment_name()} environment")
@@ -80,30 +83,73 @@ class DataProcessor:
         """
         start_time = datetime.now()
         
+        # Validate data file exists
         if not os.path.exists(self.data_path):
             self.logger.error(f"Data file not found: {self.data_path}")
             raise FileNotFoundError(f"Hospital data file not found at {self.data_path}")
         
         self.logger.info(f"Loading data from {self.data_path}")
         
+        # Reset any previous data
+        self.patient_data = None
+        self.diagnosis_data = None
+        
         try:
-            # Load data using a context manager to ensure proper resource cleanup
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # Load both sheets concurrently for better performance
-                patient_future = executor.submit(self._load_patient_data)
-                diagnosis_future = executor.submit(self._load_diagnosis_data)
-                
-                # Get results
-                self.patient_data = patient_future.result()
-                self.diagnosis_data = diagnosis_future.result()
+            # First verify the Excel file is readable and has required sheets
+            self._verify_excel_file()
+            
+            # Load both sheets - with better error handling
+            try:
+                self.logger.info("Loading patient and diagnosis data")
+                # Try sequential loading instead of concurrent to avoid issues
+                self.patient_data = self._load_patient_data()
+                self.diagnosis_data = self._load_diagnosis_data()
+            except Exception as e:
+                self.logger.error(f"Error during data loading: {str(e)}", exc_info=True)
+                raise ValueError(f"Failed to load data: {str(e)}")
+            
+            # Validate that we have both datasets
+            if self.patient_data is None:
+                raise ValueError("Failed to load patient data")
+            if self.diagnosis_data is None:
+                raise ValueError("Failed to load diagnosis data")
 
+            # Apply sanitization to the data
+            self.logger.info("Starting data sanitization process")
+            
+            # Sanitize patient data
+            try:
+                patient_sanitize_stats, sanitized_patient_data = self._sanitize_dataframe(self.patient_data)
+                # Update with sanitized data
+                self.patient_data = sanitized_patient_data
+            except Exception as e:
+                # If unpacking fails, it means _sanitize_dataframe returned just stats
+                self.logger.warning(f"Patient data sanitization might have failed: {str(e)}")
+                patient_sanitize_stats = {"error": str(e)}
+            
+            # Sanitize diagnosis data
+            try:
+                diagnosis_sanitize_stats, sanitized_diagnosis_data = self._sanitize_dataframe(self.diagnosis_data)
+                # Update with sanitized data
+                self.diagnosis_data = sanitized_diagnosis_data
+            except Exception as e:
+                # If unpacking fails, it means _sanitize_dataframe returned just stats
+                self.logger.warning(f"Diagnosis data sanitization might have failed: {str(e)}")
+                diagnosis_sanitize_stats = {"error": str(e)}
+            
+            # Combine sanitization stats
+            self.stats["sanitization_stats"] = {
+                "patient_data": patient_sanitize_stats,
+                "diagnosis_data": diagnosis_sanitize_stats
+            }
+            
             # Track stats
             self.stats["patient_records"] = self.patient_data.height
             self.stats["diagnosis_records"] = self.diagnosis_data.height
             self.stats["load_timestamp"] = datetime.now()
             self.stats["processing_time_sec"] = (datetime.now() - start_time).total_seconds()
             
-            self.logger.info(f"Successfully loaded {self.patient_data.height} patient records and "
+            self.logger.info(f"Successfully loaded and sanitized {self.patient_data.height} patient records and "
                             f"{self.diagnosis_data.height} diagnosis records")
             
             # Run data quality checks
@@ -113,11 +159,42 @@ class DataProcessor:
             
         except Exception as e:
             self.logger.error(f"Failed to load data: {str(e)}", exc_info=True)
-            raise
-    
+            raise ValueError(f"Failed to load data: {str(e)}")
+
+    def _verify_excel_file(self):
+        """
+        Verify that the Excel file exists and contains the required sheets.
+        Raises appropriate exceptions if verification fails.
+        """
+        import openpyxl
+        
+        try:
+            self.logger.info(f"Verifying Excel file at {self.data_path}")
+            
+            # Try to open the Excel file to check if it's valid
+            workbook = openpyxl.load_workbook(self.data_path, read_only=True)
+            
+            # Check if the required sheets exist
+            sheet_names = workbook.sheetnames
+            self.logger.debug(f"Excel file contains sheets: {sheet_names}")
+            
+            if "Patient Details" not in sheet_names:
+                raise ValueError("Excel file missing required sheet 'Patient Details'")
+            
+            if "Diagnosis Details" not in sheet_names:
+                raise ValueError("Excel file missing required sheet 'Diagnosis Details'")
+                
+            # Close the workbook
+            workbook.close()
+            
+            self.logger.info("Excel file verification successful")
+        except Exception as e:
+            self.logger.error(f"Excel file verification failed: {str(e)}", exc_info=True)
+            raise ValueError(f"Excel file verification failed: {str(e)}")
+
     def _load_patient_data(self) -> pl.DataFrame:
         """
-        Load patient data from Excel without schema modifications.
+        Load patient data from Excel with enhanced error handling.
         
         Returns:
             Patient data as a Polars DataFrame with standardized column names
@@ -125,7 +202,25 @@ class DataProcessor:
         try:
             # Load raw data directly with read_excel
             self.logger.info(f"Loading patient data from {self.data_path}, sheet 'Patient Details'")
-            df = pl.read_excel(self.data_path, sheet_name="Patient Details")
+            
+            # Try loading with polars
+            try:
+                df = pl.read_excel(self.data_path, sheet_name="Patient Details")
+            except Exception as polars_error:
+                # If polars fails, try with pandas as a fallback
+                self.logger.warning(f"Polars read_excel failed: {str(polars_error)}. Trying pandas fallback.")
+                import pandas as pd
+                
+                # Load with pandas
+                pandas_df = pd.read_excel(self.data_path, sheet_name="Patient Details")
+                
+                # Convert to polars
+                df = pl.from_pandas(pandas_df)
+                self.logger.info("Successfully loaded with pandas fallback")
+            
+            # Verify we have data
+            if df is None or df.height == 0 or df.width == 0:
+                raise ValueError(f"No data found in Patient Details sheet (rows: {df.height if df is not None else 'None'}, cols: {df.width if df is not None else 'None'})")
             
             # Convert column names to snake_case
             df = self._convert_column_names_to_snake_case(df)
@@ -139,7 +234,7 @@ class DataProcessor:
 
     def _load_diagnosis_data(self) -> pl.DataFrame:
         """
-        Load diagnosis data from Excel without schema modifications.
+        Load diagnosis data from Excel with enhanced error handling.
         
         Returns:
             Diagnosis data as a Polars DataFrame with standardized column names
@@ -147,7 +242,25 @@ class DataProcessor:
         try:
             # Load raw data directly with read_excel
             self.logger.info(f"Loading diagnosis data from {self.data_path}, sheet 'Diagnosis Details'")
-            df = pl.read_excel(self.data_path, sheet_name="Diagnosis Details")
+            
+            # Try loading with polars
+            try:
+                df = pl.read_excel(self.data_path, sheet_name="Diagnosis Details")
+            except Exception as polars_error:
+                # If polars fails, try with pandas as a fallback
+                self.logger.warning(f"Polars read_excel failed: {str(polars_error)}. Trying pandas fallback.")
+                import pandas as pd
+                
+                # Load with pandas
+                pandas_df = pd.read_excel(self.data_path, sheet_name="Diagnosis Details")
+                
+                # Convert to polars
+                df = pl.from_pandas(pandas_df)
+                self.logger.info("Successfully loaded with pandas fallback")
+            
+            # Verify we have data
+            if df is None or df.height == 0 or df.width == 0:
+                raise ValueError(f"No data found in Diagnosis Details sheet (rows: {df.height if df is not None else 'None'}, cols: {df.width if df is not None else 'None'})")
             
             # Convert column names to snake_case
             df = self._convert_column_names_to_snake_case(df)
@@ -158,6 +271,151 @@ class DataProcessor:
         except Exception as e:
             self.logger.error(f"Error loading diagnosis data: {str(e)}", exc_info=True)
             raise
+    
+    def _sanitize_dataframe(self, df: pl.DataFrame) -> Dict[str, Any]:
+        """
+        Sanitize DataFrame by removing special characters and unwanted spaces from string columns.
+        
+        Args:
+            df: DataFrame to sanitize
+                
+        Returns:
+            Dictionary with sanitization statistics
+        """
+        if df is None:
+            return {"error": "No data to sanitize"}
+        
+        sanitize_stats = {
+            "original_rows": df.height,
+            "columns_sanitized": [],
+            "cells_modified": 0,
+            "sanitized_rows": 0
+        }
+        
+        self.logger.info(f"Sanitizing DataFrame with {df.height} rows and {df.width} columns")
+        
+        # Instead of cloning the DataFrame, create a copy safely by converting to dict and back
+        # This avoids potential issues with the clone() method
+        try:
+            # Get string columns to sanitize
+            string_columns = [col for col in df.columns if df.schema[col] == pl.Utf8]
+            sanitize_stats["total_string_columns"] = len(string_columns)
+            
+            # Only proceed with sanitization if we have string columns
+            if not string_columns:
+                self.logger.info("No string columns to sanitize")
+                return sanitize_stats
+            
+            # Track modified rows
+            modified_rows = set()
+            
+            # Create a new DataFrame by modifying each column as needed
+            # Start with all columns from the original DataFrame
+            new_df_columns = {}
+            for col in df.columns:
+                if col in string_columns:
+                    # For string columns, we'll apply sanitization
+                    original_values = df[col].to_list()
+                    sanitized_values = []
+                    was_modified = False
+                    modified_cells_count = 0
+                    
+                    # Process each value in the column
+                    for row_idx, value in enumerate(original_values):
+                        sanitized_value = self._sanitize_string_value(col, value)
+                        sanitized_values.append(sanitized_value)
+                        
+                        # Check if the value was modified
+                        if value != sanitized_value:
+                            modified_cells_count += 1
+                            modified_rows.add(row_idx)
+                            was_modified = True
+                    
+                    # If the column was modified, update stats
+                    if was_modified:
+                        sanitize_stats["columns_sanitized"].append(col)
+                        sanitize_stats["cells_modified"] += modified_cells_count
+                        self.logger.debug(f"Sanitized column '{col}': {modified_cells_count} cells modified")
+                        
+                        # Log sample modifications (up to 5)
+                        examples = []
+                        for i, (orig, sanitized) in enumerate(zip(original_values, sanitized_values)):
+                            if orig != sanitized and len(examples) < 5:
+                                examples.append(f"Row {i}: '{orig}' -> '{sanitized}'")
+                        
+                        if examples:
+                            self.logger.debug("Examples of modifications: " + ", ".join(examples))
+                    
+                    # Add the column (original or sanitized) to the new DataFrame
+                    new_df_columns[col] = pl.Series(name=col, values=sanitized_values)
+                else:
+                    # For non-string columns, keep the original values
+                    new_df_columns[col] = df[col]
+            
+            # Create a new DataFrame from the columns
+            sanitized_df = pl.DataFrame(new_df_columns)
+            
+            # Update stats
+            sanitize_stats["sanitized_rows"] = len(modified_rows)
+            
+            self.logger.info(f"Sanitization complete: {len(sanitize_stats['columns_sanitized'])}/{sanitize_stats['total_string_columns']} columns modified, "
+                            f"{sanitize_stats['cells_modified']} cells, {sanitize_stats['sanitized_rows']} rows")
+            
+            # The sanitized DataFrame is now ready for further use
+            # Replace the input df with our sanitized DataFrame
+            # We can't directly modify the input df because it's passed by value
+            # Instead, we return the sanitized DataFrame which will be assigned to 
+            # self.patient_data or self.diagnosis_data in the calling method
+            
+            return sanitize_stats, sanitized_df
+            
+        except Exception as e:
+            self.logger.error(f"Error during DataFrame sanitization: {str(e)}", exc_info=True)
+            # Return the original DataFrame if sanitization fails
+            return {"error": str(e), "exception": str(e)}, df
+
+    def _sanitize_string_value(self, column_name, value):
+        """
+        Sanitize a string value based on the column type.
+        
+        Args:
+            column_name: Name of the column (used to determine sanitization rules)
+            value: The string value to sanitize
+            
+        Returns:
+            Sanitized string value
+        """
+        # Skip None values and non-string values
+        if value is None or not isinstance(value, str):
+            return value
+        
+        # Original value for comparison
+        original = value
+        
+        # Trim leading/trailing whitespace
+        value = value.strip()
+        
+        # Replace multiple spaces with single space
+        value = re.sub(r'\s+', ' ', value)
+        
+        # Remove control characters
+        value = re.sub(r'[\x00-\x1F\x7F]', '', value)
+        
+        # Special character handling depends on column type 
+        if column_name.lower() in ('registry_id', 'patient_id', 'id'):
+            # For ID columns: remove everything except alphanumeric chars and common ID separators
+            value = re.sub(r'[^\w\-\.]', '', value)
+        elif 'name' in column_name.lower():
+            # For name columns: allow letters, spaces, hyphens, and apostrophes
+            value = re.sub(r'[^\w\s\-\']', '', value)
+        elif 'diagnosis' in column_name.lower():
+            # For diagnosis: allow more punctuation for medical terms
+            value = re.sub(r'[^\w\s\-\.,:/()]', '', value)
+        else:
+            # For other string columns: remove special chars but keep basic punctuation
+            value = re.sub(r'[^\w\s\-\.,:/()]', '', value)
+        
+        return value
     
     def _convert_column_names_to_snake_case(self, df):
         """
@@ -276,6 +534,7 @@ class DataProcessor:
     def _validate_data_integrity(self) -> Dict[str, Any]:
         """
         Perform data validation checks to ensure data integrity.
+        All comparisons are performed as strings to avoid type mismatches.
         
         Returns:
             Dictionary with validation results
@@ -289,7 +548,10 @@ class DataProcessor:
         # Check for patients without registry_id
         if 'registry_id' in self.patient_data.columns:
             missing_ids = self.patient_data.filter(
-                pl.col('registry_id').is_null() | (pl.col('registry_id') == "")
+                pl.col('registry_id').is_null() | 
+                (pl.col('registry_id').cast(pl.Utf8) == "") |
+                (pl.col('registry_id').cast(pl.Utf8) == "null") |
+                (pl.col('registry_id').cast(pl.Utf8) == "nan")
             ).height
             
             validation_results['missing_patient_ids'] = missing_ids
@@ -300,33 +562,157 @@ class DataProcessor:
         if ('registry_id' in self.patient_data.columns and 
             'registry_id' in self.diagnosis_data.columns):
             
-            # Get all patient IDs
-            patient_ids = set(self.patient_data.select('registry_id').to_series().to_list())
-            
-            # Check which diagnosis records don't have a matching patient
-            orphaned_diagnoses = self.diagnosis_data.filter(
-                ~pl.col('registry_id').is_in(patient_ids)
-            ).height
-            
-            validation_results['orphaned_diagnoses'] = orphaned_diagnoses
-            if orphaned_diagnoses > 0:
-                self.logger.warning(f"Found {orphaned_diagnoses} diagnoses without a matching patient")
+            # Get all patient IDs - convert to strings for consistent comparison
+            try:
+                # Use a safer method to collect patient IDs as strings
+                patient_id_series = self.patient_data.select(
+                    pl.col('registry_id').cast(pl.Utf8).alias('registry_id_str')
+                ).to_series()
+                
+                # Filter out None/null/empty values
+                patient_ids = set()
+                for id_val in patient_id_series:
+                    if id_val is not None and str(id_val).strip() not in ("", "null", "nan"):
+                        patient_ids.add(str(id_val).strip())
+                
+                self.logger.debug(f"Found {len(patient_ids)} unique patient IDs for validation")
+                
+                # First convert diagnosis registry_ids to strings, then check against patient_ids
+                orphaned_diagnoses = self.diagnosis_data.filter(
+                    ~pl.col('registry_id').cast(pl.Utf8).is_in(list(patient_ids))
+                ).height
+                
+                validation_results['orphaned_diagnoses'] = orphaned_diagnoses
+                if orphaned_diagnoses > 0:
+                    self.logger.warning(f"Found {orphaned_diagnoses} diagnoses without a matching patient")
+                    
+                    # Log some examples of orphaned diagnoses for debugging
+                    sample_orphaned = self.diagnosis_data.filter(
+                        ~pl.col('registry_id').cast(pl.Utf8).is_in(list(patient_ids))
+                    ).head(5)
+                    
+                    for i, row in enumerate(sample_orphaned.to_dicts()):
+                        self.logger.debug(f"Orphaned diagnosis #{i+1}: registry_id={row['registry_id']} "
+                                        f"(type: {type(row['registry_id']).__name__})")
+                        
+            except Exception as e:
+                self.logger.error(f"Error validating orphaned diagnoses: {str(e)}", exc_info=True)
+                validation_results['orphaned_diagnoses_error'] = str(e)
         
         # Check for duplicate registry_ids in patient data
         if 'registry_id' in self.patient_data.columns:
-            duplicate_ids = (
-                self.patient_data.group_by('registry_id')
-                .agg(pl.count().alias('count'))
-                .filter(pl.col('count') > 1)
-                .height
-            )
-            
-            validation_results['duplicate_patient_ids'] = duplicate_ids
-            if duplicate_ids > 0:
-                self.logger.warning(f"Found {duplicate_ids} duplicate patient registry_ids")
+            try:
+                # Work with string-casted registry_ids for consistent comparison
+                # Add exception handling in case of null values or other issues
+                duplicate_ids = (
+                    self.patient_data.with_column(
+                        pl.col('registry_id').cast(pl.Utf8).alias('registry_id_str')
+                    )
+                    .group_by('registry_id_str')
+                    .agg(pl.count().alias('count'))
+                    .filter(pl.col('count') > 1)
+                )
+                
+                # Get count of duplicate IDs
+                duplicate_count = duplicate_ids.height
+                
+                validation_results['duplicate_patient_ids'] = duplicate_count
+                if duplicate_count > 0:
+                    self.logger.warning(f"Found {duplicate_count} duplicate patient registry_ids")
+                    
+                    # Log the duplicate IDs for debugging
+                    for row in duplicate_ids.to_dicts():
+                        self.logger.debug(f"Duplicate patient ID: {row['registry_id_str']} appears {row['count']} times")
+                    
+            except Exception as e:
+                self.logger.error(f"Error checking for duplicate patient IDs: {str(e)}", exc_info=True)
+                validation_results['duplicate_check_error'] = str(e)
+        
+        # Add additional validation: Check for invalid data types
+        validation_results['type_validation'] = self._validate_data_types()
         
         # Update stats with validation results
         self.stats['data_quality'] = validation_results
+        
+        return validation_results
+
+    def _validate_data_types(self) -> Dict[str, Any]:
+        """
+        Validate data types in both patient and diagnosis data.
+        
+        Returns:
+            Dictionary with type validation results
+        """
+        validation_results = {
+            'patient_data': {},
+            'diagnosis_data': {}
+        }
+        
+        # Check patient data types
+        if self.patient_data is not None:
+            patient_issues = {}
+            
+            # Age should be numeric or castable to numeric
+            if 'age' in self.patient_data.columns:
+                try:
+                    non_numeric_ages = self.patient_data.filter(
+                        pl.col('age').is_not_null() & 
+                        ~pl.col('age').cast(pl.Utf8).str.strip().cast(pl.Float64, strict=False).is_not_null()
+                    ).height
+                    
+                    if non_numeric_ages > 0:
+                        patient_issues['non_numeric_ages'] = non_numeric_ages
+                        self.logger.warning(f"Found {non_numeric_ages} patient records with non-numeric age values")
+                except Exception as e:
+                    self.logger.error(f"Error validating age data types: {str(e)}")
+                    patient_issues['age_validation_error'] = str(e)
+            
+            # Gender should have consistent values
+            if 'gender' in self.patient_data.columns:
+                try:
+                    # Get all unique gender values
+                    gender_values = self.patient_data.select(
+                        pl.col('gender').cast(pl.Utf8).alias('gender_str')
+                    ).unique().to_series().to_list()
+                    
+                    # Filter out None values
+                    gender_values = [g for g in gender_values if g is not None]
+                    
+                    # Check if there are unexpected gender values
+                    standard_genders = {'male', 'female', 'm', 'f', 'man', 'woman'}
+                    non_standard = [g for g in gender_values if g.lower() not in standard_genders]
+                    
+                    if non_standard:
+                        patient_issues['non_standard_genders'] = non_standard
+                        self.logger.info(f"Found non-standard gender values: {non_standard}")
+                except Exception as e:
+                    self.logger.error(f"Error validating gender values: {str(e)}")
+                    patient_issues['gender_validation_error'] = str(e)
+            
+            validation_results['patient_data'] = patient_issues
+        
+        # Check diagnosis data types
+        if self.diagnosis_data is not None:
+            diagnosis_issues = {}
+            
+            # Check date fields if present
+            date_columns = [col for col in self.diagnosis_data.columns if 'date' in col.lower()]
+            for date_col in date_columns:
+                try:
+                    # Try to detect non-date values
+                    non_date_count = self.diagnosis_data.filter(
+                        pl.col(date_col).is_not_null() & 
+                        ~pl.col(date_col).is_datelike()
+                    ).height
+                    
+                    if non_date_count > 0:
+                        diagnosis_issues[f'non_date_{date_col}'] = non_date_count
+                        self.logger.warning(f"Found {non_date_count} records with non-date values in {date_col}")
+                except Exception as e:
+                    self.logger.error(f"Error validating date column {date_col}: {str(e)}")
+                    diagnosis_issues[f'{date_col}_validation_error'] = str(e)
+            
+            validation_results['diagnosis_data'] = diagnosis_issues
         
         return validation_results
     
@@ -580,6 +966,9 @@ class DataProcessor:
                 except:
                     pass
             
+            # Add sanitization stats to the output
+            sanitization_stats = self.stats.get("sanitization_stats", {})
+            
             # Combined stats
             stats = {
                 "patient_data": patient_stats,
@@ -588,7 +977,19 @@ class DataProcessor:
                     "load_timestamp": self.stats.get("load_timestamp"),
                     "processing_time_sec": self.stats.get("processing_time_sec"),
                 },
-                "data_quality": self.stats.get("data_quality", {})
+                "data_quality": self.stats.get("data_quality", {}),
+                "sanitization": {
+                    "patient_data": sanitization_stats.get("patient_data", {}),
+                    "diagnosis_data": sanitization_stats.get("diagnosis_data", {}),
+                    "summary": {
+                        "total_columns_sanitized": len(sanitization_stats.get("patient_data", {}).get("columns_sanitized", [])) + 
+                                                 len(sanitization_stats.get("diagnosis_data", {}).get("columns_sanitized", [])),
+                        "total_cells_modified": sanitization_stats.get("patient_data", {}).get("cells_modified", 0) + 
+                                               sanitization_stats.get("diagnosis_data", {}).get("cells_modified", 0),
+                        "total_rows_affected": sanitization_stats.get("patient_data", {}).get("sanitized_rows", 0) + 
+                                              sanitization_stats.get("diagnosis_data", {}).get("sanitized_rows", 0)
+                    }
+                }
             }
             
             return stats
