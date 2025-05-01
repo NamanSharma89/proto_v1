@@ -117,83 +117,41 @@ class DataProcessor:
     
     def _load_patient_data(self) -> pl.DataFrame:
         """
-        Load patient data from Excel with enhanced processing.
+        Load patient data from Excel without schema modifications.
         
         Returns:
-            Processed patient data as a Polars DataFrame
+            Patient data as a Polars DataFrame with standardized column names
         """
         try:
             # Load raw data directly with read_excel
+            self.logger.info(f"Loading patient data from {self.data_path}, sheet 'Patient Details'")
             df = pl.read_excel(self.data_path, sheet_name="Patient Details")
             
             # Convert column names to snake_case
             df = self._convert_column_names_to_snake_case(df)
-            
-            # Handle schema with explicit data types for important columns
-            schema = {
-                "age": pl.Int32,
-                "registry_id": pl.Utf8,
-                "gender": pl.Utf8,
-                "admission_date": pl.Utf8,
-                "discharge_date": pl.Utf8,
-            }
-            
-            # Apply schema with error handling for each column
-            for col, dtype in schema.items():
-                if col in df.columns:
-                    try:
-                        df = df.with_columns(
-                            pl.col(col).cast(dtype, strict=False)
-                        )
-                    except Exception as e:
-                        self.logger.warning(f"Could not convert column {col} to {dtype}: {str(e)}")
-                        # Keep as string if conversion fails
-                        df = df.with_columns(pl.col(col).cast(pl.Utf8, strict=False))
-            
-            # Process and enhance the data
-            df = self._preprocess_patient_data(df)
+            self.logger.debug(f"Loaded patient data with {df.height} rows and {df.width} columns")
             
             return df
             
         except Exception as e:
             self.logger.error(f"Error loading patient data: {str(e)}", exc_info=True)
             raise
-    
+
     def _load_diagnosis_data(self) -> pl.DataFrame:
         """
-        Load diagnosis data from Excel with enhanced processing.
+        Load diagnosis data from Excel without schema modifications.
         
         Returns:
-            Processed diagnosis data as a Polars DataFrame
+            Diagnosis data as a Polars DataFrame with standardized column names
         """
         try:
             # Load raw data directly with read_excel
+            self.logger.info(f"Loading diagnosis data from {self.data_path}, sheet 'Diagnosis Details'")
             df = pl.read_excel(self.data_path, sheet_name="Diagnosis Details")
             
             # Convert column names to snake_case
             df = self._convert_column_names_to_snake_case(df)
-            
-            # Set schema with appropriate types
-            schema = {
-                "registry_id": pl.Utf8,
-                "diagnosis": pl.Utf8,
-                "diagnosis_date": pl.Utf8,
-                "diagnosis_code": pl.Utf8,
-            }
-            
-            # Apply schema with error handling
-            for col, dtype in schema.items():
-                if col in df.columns:
-                    try:
-                        df = df.with_columns(
-                            pl.col(col).cast(dtype, strict=False)
-                        )
-                    except Exception as e:
-                        self.logger.warning(f"Could not convert column {col} to {dtype}: {str(e)}")
-                        df = df.with_columns(pl.col(col).cast(pl.Utf8, strict=False))
-            
-            # Process the data
-            df = self._preprocess_diagnosis_data(df)
+            self.logger.debug(f"Loaded diagnosis data with {df.height} rows and {df.width} columns")
             
             return df
             
@@ -283,48 +241,35 @@ class DataProcessor:
     
     def _preprocess_patient_data(self, df):
         """
-        Clean and preprocess the patient data.
-        Basic version with minimal processing - advanced features commented out for future implementation.
+        Minimal preprocessing for patient data, keeping data as-is.
         
         Args:
-            df: Raw patient data DataFrame
-            
+            df: Patient data DataFrame
+                
         Returns:
-            Processed patient DataFrame
+            Original DataFrame with minimal changes
         """
-        # Handle missing values with simple null replacement
-        df = df.fill_null("")
+        # Handle null values if needed - can be removed if you want to keep nulls as is
+        df = df.fill_null(None)
         
-        self.logger.info("Basic patient data preprocessing complete - advanced features to be implemented later")
-        
-        # TODO: Implement advanced preprocessing features:
-        # TODO: - Date handling and conversion
-        # TODO: - Stay duration calculation
-        # TODO: - Age validation and grouping
-        # TODO: - Additional data quality checks
+        self.logger.info("Minimal patient data preprocessing complete - keeping data as-is")
         
         return df
-    
+
     def _preprocess_diagnosis_data(self, df):
         """
-        Clean and preprocess the diagnosis data.
-        Basic version with minimal processing - advanced features commented out for future implementation.
+        Minimal preprocessing for diagnosis data, keeping data as-is.
         
         Args:
-            df: Raw diagnosis data DataFrame
-            
+            df: Diagnosis data DataFrame
+                
         Returns:
-            Processed diagnosis DataFrame
+            Original DataFrame with minimal changes
         """
-        # Handle missing values with simple null replacement
-        df = df.fill_null("")
+        # Handle null values if needed - can be removed if you want to keep nulls as is
+        df = df.fill_null(None)
         
-        self.logger.info("Basic diagnosis data preprocessing complete - advanced features to be implemented later")
-        
-        # TODO: Implement advanced preprocessing features:
-        # TODO: - Diagnosis code standardization
-        # TODO: - Date handling and conversion
-        # TODO: - Relationship validation with patient data
+        self.logger.info("Minimal diagnosis data preprocessing complete - keeping data as-is")
         
         return df
     
