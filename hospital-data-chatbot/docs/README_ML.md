@@ -4,7 +4,80 @@ This guide outlines how to enhance your Hospital Data Chatbot with machine learn
 
 ## Architecture Overview
 
-![ML Architecture](https://mermaid.ink/img/pako:eNp1ksFuwjAMhl_FyglU7cBhh06T4MJuk3YBbzGJoWhNAyUVAqp49x0NrZ0Y9eHn-P_yO2lLaVJKEqmAq1LzJXwYjDHUBSP3-uOj1bV5EvNVGDhvs0fzg2pGmN3KgYNcMxDLGKXHYXGJXPTCwRyDO6vhZDiQ3oUagtZGFSYJVofX0pBljVwZTMcEyOVCo8HzBhzGXR4cBcqhz0dxCrPzKHGhnC-A7Xg84oF3yNPdXOJfqnJe6S1x9FVv4pBnW7KshPZPnfSmpR3vpFMJdN51YuXfMalJvzE6X6uW69o6tK20iTsUYHplbctLtZvF6r5IUC58eECFa0EtXbIk0VrpvWDJ2u9I7JL_jqyy4v8oK1rIvKLWWEzEDGpFE5EKlRsOaB_pFlZa7bWpMbz3TrWMijR-Jt7yUb-bSkrFIbTHLbUhvbtbYLv8BrkvLBU)
+The following diagram illustrates the machine learning architecture that we're implementing:
+
+```mermaid
+flowchart TD
+    subgraph DB["PostgreSQL Database"]
+        PatientData[Patient Details]
+        DiagnosisData[Diagnosis Details]
+        MLViews[ML Materialized Views]
+    end
+    
+    subgraph FeatureLayer["Feature Engineering Layer"]
+        FE[Feature Engineering]
+        FS[Feature Store]
+        PatientRiskFeatures[Patient Risk Features]
+        ReadmissionFeatures[Readmission Features]
+        DiagnosisFeatures[Diagnosis Clustering Features]
+    end
+    
+    subgraph ModelLayer["ML Model Layer"]
+        SageMaker[AWS SageMaker Integration]
+        Models[Hospital ML Models]
+        ModelRegistry[Model Registry]
+        RiskModel[Risk Stratification]
+        ReadmissionModel[Readmission Prediction]
+        ClusteringModel[Diagnosis Clustering]
+    end
+    
+    subgraph APILayer["API Layer"]
+        MLEndpoints[ML API Endpoints]
+        SQLEndpoints[SQL Chat Endpoints]
+        ChatEndpoints[LLM Chat Endpoints]
+    end
+    
+    subgraph ClientLayer["Client Applications"]
+        Dashboard[Risk Dashboard]
+        ChatInterface[Chat Interface]
+        Alerts[Clinical Alerts]
+    end
+    
+    %% Data Flow Connections
+    PatientData --> FE
+    DiagnosisData --> FE
+    MLViews --> FE
+    
+    FE --> PatientRiskFeatures
+    FE --> ReadmissionFeatures
+    FE --> DiagnosisFeatures
+    
+    PatientRiskFeatures --> FS
+    ReadmissionFeatures --> FS
+    DiagnosisFeatures --> FS
+    
+    FS --> Models
+    FS --> SageMaker
+    
+    SageMaker --> ModelRegistry
+    ModelRegistry --> Models
+    
+    Models --> RiskModel
+    Models --> ReadmissionModel
+    Models --> ClusteringModel
+    
+    RiskModel --> MLEndpoints
+    ReadmissionModel --> MLEndpoints
+    ClusteringModel --> MLEndpoints
+    
+    MLEndpoints --> APILayer
+    SQLEndpoints --> APILayer
+    ChatEndpoints --> APILayer
+    
+    APILayer --> Dashboard
+    APILayer --> ChatInterface
+    APILayer --> Alerts
+```
 
 ### Key Components
 
@@ -136,12 +209,12 @@ CREATE INDEX ON ml_patient_features (registry_id);
 Create a function to refresh the materialized views:
 
 ```sql
-CREATE OR REPLACE FUNCTION refresh_ml_views() RETURNS void AS $
+CREATE OR REPLACE FUNCTION refresh_ml_views() RETURNS void AS $$
 BEGIN
     REFRESH MATERIALIZED VIEW CONCURRENTLY ml_patient_features;
     -- Add more views as needed
 END;
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 ```
 
 Schedule this to run regularly:

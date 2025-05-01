@@ -1,0 +1,63 @@
+flowchart TD
+    subgraph DataSources["Data Sources"]
+        RDS[("AWS RDS<br>PostgreSQL")]
+        S3Raw[("AWS S3<br>Raw Data")]
+    end
+    
+    subgraph DataProcessing["Data Processing"]
+        Lambda["AWS Lambda<br>Feature Engineering"]
+        S3Features[("AWS S3<br>Feature Store")]
+    end
+    
+    subgraph MLPipeline["ML Pipeline"]
+        SageTrain["Amazon SageMaker<br>Training Jobs"]
+        SageModel["Amazon SageMaker<br>Model Registry"]
+        SageEndpoint["Amazon SageMaker<br>Endpoints"]
+    end
+    
+    subgraph APILayer["API Layer"]
+        API["Amazon API Gateway"]
+        EC2["EC2 Instance<br>FastAPI Application"]
+        ELB["Elastic Load Balancer"]
+    end
+    
+    subgraph Monitoring["Monitoring & Management"]
+        CloudWatch["Amazon CloudWatch"]
+        CloudTrail["AWS CloudTrail"]
+        SNS["Amazon SNS<br>Alerts"]
+    end
+    
+    %% Connections
+    RDS --> Lambda
+    S3Raw --> Lambda
+    Lambda --> S3Features
+    S3Features --> SageTrain
+    
+    SageTrain --> SageModel
+    SageModel --> SageEndpoint
+    
+    Lambda --> EC2
+    SageEndpoint --> EC2
+    EC2 --> ELB
+    ELB --> API
+    
+    SageEndpoint --> CloudWatch
+    EC2 --> CloudWatch
+    CloudWatch --> SNS
+    API --> CloudTrail
+    
+    %% Style definitions
+    classDef aws fill:#FF9900,stroke:#232F3E,color:#232F3E,stroke-width:2px
+    classDef db fill:#3B48CC,stroke:#232F3E,color:white,stroke-width:2px
+    classDef storage fill:#3B48CC,stroke:#232F3E,color:white,stroke-width:2px
+    classDef api fill:#CC2264,stroke:#232F3E,color:white,stroke-width:2px
+    classDef compute fill:#EC7211,stroke:#232F3E,color:white,stroke-width:2px
+    classDef monitoring fill:#CC2264,stroke:#232F3E,color:white,stroke-width:2px
+    
+    %% Apply styles
+    class RDS,S3Raw,S3Features db
+    class Lambda compute
+    class SageTrain,SageModel,SageEndpoint aws
+    class API,ELB api
+    class EC2 compute
+    class CloudWatch,CloudTrail,SNS monitoring
