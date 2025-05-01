@@ -1,6 +1,6 @@
 # 🏥 Hospital Data Chatbot
 
-> An AI-powered chatbot for analyzing hospital patient data using AWS Bedrock and SageMaker
+> An AI-powered chatbot for analyzing hospital patient data using AWS Bedrock, Text-to-SQL, and Machine Learning
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Python: 3.9+](https://img.shields.io/badge/Python-3.9+-blue.svg)
@@ -9,34 +9,112 @@
 
 ## 📋 Overview
 
-This application provides an intelligent chatbot interface for hospital staff to query patient and diagnosis data through natural language. It uses AWS Bedrock Large Language Models to interpret queries and provides accurate statistics and insights on hospital data.
+This application provides an intelligent chatbot interface for hospital staff to query patient and diagnosis data through natural language. It uses AWS Bedrock Large Language Models to interpret queries, converts them to SQL, and leverages machine learning models to provide advanced insights and predictions.
 
 ### Key Features
 
-- 🔍 Natural language query interface for hospital data analysis
-- 📊 Accurate statistical calculations on patient metrics
-- 🧹 Advanced data sanitization for cleaning special characters and formatting
-- 🔄 Automated nightly data processing pipeline
-- 📝 PostgreSQL database integration with proper table relationships
-- 🧠 AWS Bedrock integration for advanced language understanding
-- 🚀 FastAPI framework for high-performance API endpoints
+- 🔍 **Natural Language to SQL**: Convert plain language questions into precise SQL queries
+- 🧠 **Machine Learning Insights**: Predictive analytics for patient risk and outcomes
+- 📊 **Statistical Analysis**: Accurate calculations on patient metrics and trends
+- 🧹 **Advanced Data Processing**: Data sanitization and feature engineering pipelines
+- 🔄 **Automated Data Pipeline**: Scheduled processing for up-to-date insights
+- 📝 **PostgreSQL Integration**: Direct querying of hospital database with proper relationships
+- 🚀 **AWS Integration**: Leverages AWS Bedrock, SageMaker, Lambda, and other services
 
-## ✨ Recent Enhancements
+## 🏗️ Architecture
 
-- **Robust Data Sanitization**: Added comprehensive data cleaning to remove special characters, normalize whitespace, and ensure consistent formatting
-- **Improved Type Safety**: Enhanced validation with consistent string-based comparisons for IDs and other fields
-- **Better Error Handling**: Added multiple fallback mechanisms for Excel loading and data processing
-- **Enhanced Validation**: Added detailed data quality checks with comprehensive reporting
-- **Type Validation**: New validation for data types in both patient and diagnosis records
+```mermaid
+flowchart TD
+    subgraph DataSources["Data Sources"]
+        RDS[("AWS RDS<br>PostgreSQL")]
+        S3Raw[("AWS S3<br>Raw Data")]
+    end
+    
+    subgraph DataProcessing["Data Processing"]
+        Lambda["AWS Lambda<br>Feature Engineering"]
+        S3Features[("AWS S3<br>Feature Store")]
+    end
+    
+    subgraph MLPipeline["ML Pipeline"]
+        SageTrain["Amazon SageMaker<br>Training Jobs"]
+        SageModel["Amazon SageMaker<br>Model Registry"]
+        SageEndpoint["Amazon SageMaker<br>Endpoints"]
+    end
+    
+    subgraph APILayer["API Layer"]
+        API["Amazon API Gateway"]
+        EC2["EC2 Instance<br>FastAPI Application"]
+        ELB["Elastic Load Balancer"]
+    end
+    
+    subgraph Monitoring["Monitoring & Management"]
+        CloudWatch["Amazon CloudWatch"]
+        CloudTrail["AWS CloudTrail"]
+        SNS["Amazon SNS<br>Alerts"]
+    end
+    
+    %% Connections
+    RDS --> Lambda
+    S3Raw --> Lambda
+    Lambda --> S3Features
+    S3Features --> SageTrain
+    
+    SageTrain --> SageModel
+    SageModel --> SageEndpoint
+    
+    Lambda --> EC2
+    SageEndpoint --> EC2
+    EC2 --> ELB
+    ELB --> API
+    
+    SageEndpoint --> CloudWatch
+    EC2 --> CloudWatch
+    CloudWatch --> SNS
+    API --> CloudTrail
+    
+    %% Style definitions
+    classDef aws fill:#FF9900,stroke:#232F3E,color:#232F3E,stroke-width:2px
+    classDef db fill:#3B48CC,stroke:#232F3E,color:white,stroke-width:2px
+    classDef storage fill:#3B48CC,stroke:#232F3E,color:white,stroke-width:2px
+    classDef api fill:#CC2264,stroke:#232F3E,color:white,stroke-width:2px
+    classDef compute fill:#EC7211,stroke:#232F3E,color:white,stroke-width:2px
+    classDef monitoring fill:#CC2264,stroke:#232F3E,color:white,stroke-width:2px
+    
+    %% Apply styles
+    class RDS,S3Raw,S3Features db
+    class Lambda compute
+    class SageTrain,SageModel,SageEndpoint aws
+    class API,ELB api
+    class EC2 compute
+    class CloudWatch,CloudTrail,SNS monitoring
+```
 
-## 🛠️ Architecture
+## ✨ Advanced Capabilities
 
-The system consists of:
+### Text-to-SQL Translation
 
-1. **Data Processing Layer**: Extract and sanitize data from Excel and store in a queryable format
-2. **Model Layer**: AWS Bedrock for LLM access
-3. **Business Logic Layer**: Python application to handle queries and calculations
-4. **Deployment Layer**: AWS infrastructure for hosting
+Our application uses AWS Bedrock to intelligently translate natural language questions into SQL queries:
+
+1. **Query Understanding**: Analyzes intent and context of natural language questions
+2. **Schema-Aware Translation**: Generates SQL based on hospital database schema
+3. **SQL Validation**: Ensures queries are safe and optimized before execution
+4. **Result Formatting**: Presents results in an easy-to-understand natural language format
+
+Example query:
+```
+"How many patients over 65 were diagnosed with pneumonia last month?"
+```
+
+### Machine Learning Predictions
+
+The system provides several ML-powered insights:
+
+1. **Patient Risk Stratification**: Classifies patients by risk level using demographic and clinical factors
+2. **Readmission Prediction**: Identifies patients at risk of 30-day readmission
+3. **Diagnosis Clustering**: Groups similar diagnoses to uncover patterns
+4. **Length of Stay Prediction**: Forecasts expected hospital stay duration
+
+All models are trained using Amazon SageMaker and served through SageMaker endpoints.
 
 ## 🚀 Getting Started
 
@@ -97,6 +175,40 @@ python -m app.main
 5. Access the API documentation:
    - http://localhost:8080/docs
 
+## 📚 API Endpoints
+
+### Text-to-SQL Interface
+
+```
+POST /api/db/sql-chat
+```
+
+Request body:
+```json
+{
+  "query": "How many male patients with diabetes were admitted last year?",
+  "include_sql": true,
+  "include_reasoning": false
+}
+```
+
+### ML Prediction Endpoints
+
+```
+GET /api/ml/patient-risk?patient_id=P12345
+GET /api/ml/readmission-risk/P12345
+GET /api/ml/diagnosis-clusters
+```
+
+### Core Endpoints
+
+```
+GET /api/health
+GET /api/data/stats
+POST /api/chat
+POST /api/import-to-db
+```
+
 ## 🌩️ AWS Deployment
 
 ```bash
@@ -116,40 +228,13 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM
 ```
 
-## 📚 Data Processing Features
+## 🔒 Security Features
 
-### Data Sanitization
-
-The application includes advanced data sanitization features:
-
-- **Column-Specific Rules**: Different sanitization rules for IDs, names, and medical terminology
-- **Special Character Handling**: Removes unwanted special characters while preserving important punctuation
-- **Whitespace Normalization**: Trims extra spaces and standardizes formatting
-- **Detailed Reporting**: Tracks modified cells and provides sanitization statistics
-
-### Data Validation
-
-Comprehensive data validation ensures data integrity:
-
-- **Orphaned Record Detection**: Identifies diagnosis records without matching patients
-- **Duplicate Detection**: Finds duplicate patient IDs with consistent type handling
-- **Type Validation**: Validates numeric fields, dates, and categorical values
-- **Missing Value Detection**: Identifies records with missing critical information
-
-## 🔒 AWS Security Configuration
-
-### IAM Roles
-
-Create a role with permissions for:
-- ✅ Bedrock access
-- ✅ S3 access for data storage
-- ✅ CloudWatch for logging
-
-### Data Security
-
-- 🔐 Encrypt hospital data at rest in S3
-- 🛡️ Use VPC endpoints for secure communication
-- 🔑 Implement proper authentication for API access
+- ✅ **SQL Injection Prevention**: All SQL queries are validated and sanitized
+- ✅ **Input Validation**: Comprehensive data validation at all entry points
+- ✅ **IAM Role-Based Access**: Fine-grained AWS permissions
+- ✅ **Data Encryption**: Hospital data encrypted at rest and in transit
+- ✅ **API Key Authentication**: Secure API access with key validation
 
 ## 📂 Project Structure
 
@@ -158,11 +243,19 @@ hospital-data-chatbot/
 │
 ├── app/                         # Application code
 │   ├── api/                     # API endpoints
+│   │   ├── routes.py            # Main API routes
+│   │   ├── sql_chat_routes.py   # Text-to-SQL endpoints
+│   │   └── ml_routes.py         # Machine learning endpoints
 │   ├── config/                  # Configuration
 │   ├── core/                    # Core logic
-│   │   ├── data_processor.py    # Enhanced data processing and sanitization
-│   │   ├── llm_connector.py     # AWS Bedrock LLM interface
-│   │   └── query_engine.py      # Natural language query processing
+│   │   ├── data_processor.py    # Data processing and sanitization
+│   │   ├── sql_query_engine.py  # Text-to-SQL engine
+│   │   └── llm_connector.py     # AWS Bedrock LLM interface
+│   ├── ml/                      # ML components
+│   │   ├── feature_engineering.py  # Feature extraction
+│   │   ├── feature_store.py     # Feature storage and caching
+│   │   ├── sagemaker_integration.py # Model training and deployment
+│   │   └── hospital_ml_models.py   # Domain-specific ML models
 │   ├── models/                  # Data models
 │   └── utils/                   # Utilities
 │       ├── db.py                # Database utilities
@@ -188,13 +281,12 @@ hospital-data-chatbot/
 
 ## 🚀 Future Enhancements
 
-- 💾 Add Caching: Cache common queries for faster responses
-- 🧠 Implement Vector Database: Store embeddings for semantic search capabilities
-- 🖥️ Build a Web Interface: Create a simple UI for interacting with the chatbot
-- 🔐 Add Authentication: Secure the API with proper user authentication
-- 📊 Enhanced Visualizations: Add graphical representation of query results
-- 🔄 Real-time Data Updates: Support for real-time data updates beyond nightly batch processing
-- 🧪 Comprehensive Test Suite: Add unit and integration tests for all components
+- 💾 **Model A/B Testing**: Compare different model versions for optimal performance
+- 🧠 **Model Drift Detection**: Automatically detect when models need retraining
+- 🖥️ **Web Dashboard**: Interactive dashboard for visualizing ML insights
+- 🔄 **Real-time Monitoring**: Stream processing for immediate alerts
+- 📊 **Enhanced Visualizations**: Visual representation of prediction results
+- 🔍 **Natural Language Explanations**: Human-readable explanations of ML predictions
 
 ## 📝 License
 
