@@ -1,6 +1,9 @@
+# app/api/routes.py
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from app.config.settings import AppConfig
+from app.api.sql_chat_routes import router as sql_chat_router
+from app.api.ml_routes import router as ml_router
 
 router = APIRouter()
 
@@ -34,7 +37,6 @@ async def data_stats(request: Request):
     
     return stats
 
-# app/api/routes.py
 @router.post("/import-to-db")
 async def import_to_db(request: Request):
     """Import processed data to the database. Used for nightly batch processing."""
@@ -65,7 +67,7 @@ async def import_to_db(request: Request):
 
 @router.post("/chat")
 async def chat(query: ChatQuery, request: Request):
-    """Process chat requests."""
+    """Process chat requests using LLM."""
     if not query.query:
         raise HTTPException(status_code=400, detail="No query provided")
     
@@ -87,3 +89,9 @@ async def chat(query: ChatQuery, request: Request):
     final_response = calc_handler.process_response(llm_response)
     
     return {"response": final_response}
+
+# Include the SQL chat routes
+router.include_router(sql_chat_router, prefix="/db")
+
+# Include the ML routes
+router.include_router(ml_router, prefix="/ml")

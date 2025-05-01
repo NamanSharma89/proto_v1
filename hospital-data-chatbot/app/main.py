@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.api.routes import router as api_router
 from app.core.data_processor import DataProcessor
+from app.core.sql_query_engine import SQLQueryEngine
 from app.utils.logging import setup_logging
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import AppConfig
@@ -20,6 +21,11 @@ def create_app():
     # Initialize data processor and load data
     data_processor = DataProcessor(auto_ingest_db=not AppConfig.is_production())
     app.state.data_processor = data_processor
+    
+    # Initialize SQL query engine
+    sql_query_engine = SQLQueryEngine()
+    app.state.sql_query_engine = sql_query_engine
+    logger.info("SQL Query Engine initialized")
     
     # Include API routes
     app.include_router(api_router, prefix="/api")
@@ -52,4 +58,6 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True) engine
+    app.state.sql_query_engine = SQLQueryEngine()
+    logger.info("SQL Query Engine initialized")
