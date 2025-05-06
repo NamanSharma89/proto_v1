@@ -41,6 +41,7 @@ terraform/
 - **Terraform**: Version 1.0.0 or later
 - **Bash**: For running the management script
 - **AWS Account**: With permissions to create all required resources
+- **AWS IAM User**: With programmatic access and appropriate permissions
 
 ## 🏁 Getting Started
 
@@ -57,7 +58,38 @@ cd aws-terraform-infra
 chmod +x terraform-infra-manager.sh
 ```
 
-3. **Update configuration files**
+3. **Set up AWS credentials**
+
+Choose one of the following methods to configure AWS credentials:
+
+#### Method 1: AWS CLI Configuration (Recommended)
+```bash
+aws configure
+```
+Enter your AWS Access Key, Secret Key, default region, and output format when prompted.
+
+#### Method 2: Environment Variables
+```bash
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_DEFAULT_REGION="us-east-1"
+```
+
+#### Method 3: Configuration File for the Script
+Create a `.awsconfig` file in your project root:
+```bash
+# AWS credentials configuration
+AWS_ACCESS_KEY_ID=your-access-key-here
+AWS_SECRET_ACCESS_KEY=your-secret-key-here
+AWS_DEFAULT_REGION=us-east-1
+```
+
+Add to your `.gitignore`:
+```
+.awsconfig
+```
+
+4. **Update configuration files**
 
 Modify the `.tfvars` files in the `environments` directory to match your requirements:
 - Update AWS region and account ID
@@ -65,13 +97,13 @@ Modify the `.tfvars` files in the `environments` directory to match your require
 - Set appropriate security group rules
 - Adjust instance types and counts for each environment
 
-4. **Initialize Terraform**
+5. **Initialize Terraform**
 
 ```bash
 ./terraform-infra-manager.sh init
 ```
 
-5. **Deploy to your desired environment**
+6. **Deploy to your desired environment**
 
 ```bash
 ./terraform-infra-manager.sh -e dev apply
@@ -201,6 +233,67 @@ terraform graph | dot -Tpng > infrastructure.png
 - **State Backup**: Regularly backup your Terraform state
 - **Secret Management**: Avoid storing secrets in Terraform files
 
+## 🔐 AWS Credential Management
+
+The infrastructure manager script supports several methods for handling AWS credentials. Choose the approach that best fits your security requirements and workflow.
+
+### Available Credential Methods
+
+#### 1. AWS CLI Profiles (Recommended)
+
+Use AWS profiles for the most secure approach:
+
+```bash
+# Configure a named profile
+aws configure --profile terraform-admin
+
+# Use the profile with the script
+./terraform-infra-manager.sh --profile terraform-admin -e dev apply
+```
+
+#### 2. Environment Variables
+
+Set credentials for the current session:
+
+```bash
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_DEFAULT_REGION="us-east-1"
+
+# Then run the script normally
+./terraform-infra-manager.sh -e dev apply
+```
+
+#### 3. Configuration File
+
+Create a `.awsconfig` file with your credentials:
+
+```
+AWS_ACCESS_KEY_ID=your-access-key-here
+AWS_SECRET_ACCESS_KEY=your-secret-key-here
+AWS_DEFAULT_REGION=us-east-1
+```
+
+The script will automatically load this file if present.
+
+#### 4. AWS IAM Roles (For EC2 Instances)
+
+If running on EC2, use IAM roles for best security:
+
+```bash
+# No credentials needed, AWS SDK will use the instance profile
+./terraform-infra-manager.sh -e prod apply
+```
+
+### Security Best Practices
+
+- **Never commit credentials** to version control
+- **Rotate keys** regularly
+- **Use temporary credentials** when possible
+- **Apply least privilege principle** to IAM permissions
+- **Enable MFA** for AWS accounts with infrastructure access
+- **Audit credential usage** regularly
+
 ## 🔍 Troubleshooting
 
 ### Common Issues
@@ -216,6 +309,11 @@ terraform graph | dot -Tpng > infrastructure.png
   ```
 
 - **Resource Limits**: Check for AWS service quotas if deployments fail
+
+- **Credential Issues**: Verify your credentials are working:
+  ```bash
+  aws sts get-caller-identity
+  ```
 
 ### Debugging
 

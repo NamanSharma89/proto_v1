@@ -1,236 +1,173 @@
-# Main Terraform configuration file
-# This file defines the primary AWS infrastructure
+# deploy/terraform/main.tf
 
-provider "aws" {
-  region = var.aws_region
+terraform {
+  required_version = ">= 1.0.0"
 
-  default_tags {
-    tags = {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  backend "s3" {
+    # Backend configuration will be provided via backend-config files
+  }
+}
+
+# Common tags for all resources
+locals {
+  common_tags = merge(
+    {
       Environment = var.environment
       Project     = var.project_name
       ManagedBy   = "Terraform"
-    }
+    },
+    var.additional_tags
+  )
+}
+
+provider "aws" {
+  region = var.aws_region
+  default_tags {
+    tags = local.common_tags
   }
 }
 
-# VPC Configuration
-resource "aws_vpc" "main" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+# Monitoring module - CloudWatch dashboards, alarms, SNS topics
+module "monitoring" {
+  source = "./modules/monitoring"
 
-  tags = {
-    Name = "${var.environment}-vpc"
-  }
-}
-
-# Public Subnets
-resource "aws_subnet" "public" {
-  count                   = length(var.public_subnet_cidrs)
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = var.public_subnet_cidrs[count.index]
-  availability_zone       = var.availability_zones[count.index]
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "${var.environment}-public-subnet-${count.index + 1}"
-  }
-}
-
-# Private Subnets
-resource "aws_subnet" "private" {
-  count             = length(var.private_subnet_cidrs)
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = var.private_subnet_cidrs[count.index]
-  availability_zone = var.availability_zones[count.index]
-
-  tags = {
-    Name = "${var.environment}-private-subnet-${count.index + 1}"
-  }
-}
-
-# Internet Gateway
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${var.environment}-igw"
-  }
-}
-
-# Elastic IP for NAT Gateway
-resource "aws_eip" "nat" {
-  count = var.enable_nat_gateway ? 1 : 0
-  domain = "vpc"
-
-  tags = {
-    Name = "${var.environment}-nat-eip"
-  }
-}
-
-# NAT Gateway
-resource "aws_nat_gateway" "nat" {
-  count         = var.enable_nat_gateway ? 1 : 0
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id
-
-  tags = {
-    Name = "${var.environment}-nat-gateway"
-  }
-
-  depends_on = [aws_internet_gateway.igw]
-}
-
-# Route Table for Public Subnets
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
-
-  tags = {
-    Name = "${var.environment}-public-route-table"
-  }
-}
-
-# Route Table for Private Subnets
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.main.id
-
-  dynamic "route" {
-    for_each = var.enable_nat_gateway ? [1] : []
-    content {
-      cidr_block = "0.0.0.0/0"
-      nat_gateway_id = aws_nat_gateway.nat[0].id
-    }
-  }
-
-  tags = {
-    Name = "${var.environment}-private-route-table"
-  }
-}
-
-# Route Table Association for Public Subnets
-resource "aws_route_table_association" "public" {
-  count          = length(var.public_subnet_cidrs)
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
-# Route Table Association for Private Subnets
-resource "aws_route_table_association" "private" {
-  count          = length(var.private_subnet_cidrs)
-  subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
-}
-
-# Security Group for Web Servers
-resource "aws_security_group" "web" {
-  name        = "${var.environment}-web-sg"
-  description = "Security group for web servers"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = var.web_ingress_cidr
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = var.web_ingress_cidr
-  }
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = var.ssh_ingress_cidr
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.environment}-web-sg"
-  }
-}
-
-# S3 Bucket for Application Assets
-resource "aws_s3_bucket" "app_assets" {
-  bucket = "${var.project_name}-${var.environment}-assets-${var.aws_account_id}"
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-assets"
-  }
-}
-
-# S3 Bucket Versioning
-resource "aws_s3_bucket_versioning" "app_assets_versioning" {
-  bucket = aws_s3_bucket.app_assets.id
-  versioning_configuration {
-    status = var.s3_versioning_enabled ? "Enabled" : "Suspended"
-  }
-}
-
-# EC2 Instances
-resource "aws_instance" "web_servers" {
-  count                  = var.web_instance_count
-  ami                    = var.ec2_ami_id
-  instance_type          = var.web_instance_type
-  subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
-  vpc_security_group_ids = [aws_security_group.web.id]
-  key_name               = var.ssh_key_name
-
-  root_block_device {
-    volume_size = var.web_instance_volume_size
-    volume_type = "gp3"
-  }
-
-  tags = {
-    Name = "${var.environment}-web-server-${count.index + 1}"
-  }
-}
-
-# CloudWatch Alarms for Instance Monitoring
-resource "aws_cloudwatch_metric_alarm" "high_cpu_alarm" {
-  count               = var.web_instance_count
-  alarm_name          = "${var.environment}-high-cpu-${count.index + 1}"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/EC2"
-  period              = "300"
-  statistic           = "Average"
-  threshold           = var.cpu_alarm_threshold
-  alarm_description   = "This metric monitors EC2 CPU utilization"
-  alarm_actions       = var.enable_sns_alerts ? [aws_sns_topic.alerts[0].arn] : []
-  ok_actions          = var.enable_sns_alerts ? [aws_sns_topic.alerts[0].arn] : []
+  project_name        = var.project_name
+  environment         = var.environment
+  alarm_email         = var.alarm_email
+  logs_retention_days = var.logs_retention_days
   
-  dimensions = {
-    InstanceId = aws_instance.web_servers[count.index].id
+  tags = local.common_tags
+}
+
+# Networking module - VPC, subnets, security groups
+module "networking" {
+  source = "./modules/networking"
+
+  project_name       = var.project_name
+  environment        = var.environment
+  vpc_cidr           = var.vpc_cidr
+  availability_zones = var.availability_zones
+  enable_nat_gateway = var.enable_nat_gateway
+  
+  # Pass common tags to the module - this will only work if tags variable is defined in networking module
+  tags = local.common_tags
+}
+
+# Storage module - S3 buckets, ECR repository
+module "storage" {
+  source = "./modules/storage"
+
+  project_name = var.project_name
+  environment  = var.environment
+  
+  tags = local.common_tags
+}
+
+# Database module - RDS PostgreSQL
+module "database" {
+  source = "./modules/database"
+
+  project_name      = var.project_name
+  environment       = var.environment
+  vpc_id            = module.networking.vpc_id
+  subnet_ids        = module.networking.private_subnet_ids
+  security_group_id = module.networking.db_security_group_id
+  
+  instance_class    = var.db_instance_class
+  allocated_storage = var.db_allocated_storage
+  db_name           = "hospital_data_${var.environment}"
+  username          = "${var.environment}_user"
+  password          = var.db_password
+  
+  # Pass common tags to the module - this will only work if tags variable is defined in database module
+  tags = local.common_tags
+}
+
+# Bedrock module - IAM roles and policies for Bedrock access
+module "bedrock" {
+  source = "./modules/bedrock"
+
+  project_name     = var.project_name
+  environment      = var.environment
+  aws_region       = var.aws_region
+  s3_bucket_arn    = module.storage.app_bucket_arn
+  bedrock_model_id = var.bedrock_model_id
+  enable_streaming = true  # Fixed: direct value instead of variable reference
+  
+  tags = local.common_tags
+}
+
+# SageMaker module - ML infrastructure
+module "sagemaker" {
+  count  = var.enable_ml ? 1 : 0
+  source = "./modules/sagemaker"
+
+  project_name            = var.project_name
+  environment             = var.environment
+  s3_bucket               = module.storage.app_bucket_name
+  vpc_id                  = module.networking.vpc_id
+  subnet_ids              = module.networking.private_subnet_ids
+  security_group_id       = module.networking.app_security_group_id
+  
+  instance_type           = var.notebook_instance_type
+  deploy_notebook         = var.environment == "dev_cloud"
+  training_instance_type  = var.training_instance_type
+  inference_instance_type = var.inference_instance_type
+  
+  tags = local.common_tags
+}
+
+# App deployment module - ECS Fargate, ALB, auto-scaling
+module "app_deployment" {
+  source = "./modules/app_deployment"
+
+  project_name          = var.project_name
+  environment           = var.environment
+  aws_region            = var.aws_region
+  
+  vpc_id                = module.networking.vpc_id
+  public_subnet_ids     = module.networking.public_subnet_ids
+  private_subnet_ids    = module.networking.private_subnet_ids
+  app_security_group_id = module.networking.app_security_group_id
+  
+  ecr_repository_url    = module.storage.ecr_repository_url
+  s3_bucket_name        = module.storage.app_bucket_name
+  db_credentials_arn    = module.database.db_credentials_arn
+  
+  image_tag             = var.image_tag
+  acm_certificate_arn   = var.acm_certificate_arn
+  
+  task_cpu              = var.task_cpu
+  task_memory           = var.task_memory
+  desired_count         = var.desired_count
+  min_capacity          = var.min_capacity
+  max_capacity          = var.max_capacity
+  
+  health_check_path     = "/api/health"
+  container_port        = 8080
+  host_port             = 8080
+  
+  domain_name           = var.domain_name
+  create_route53_record = var.create_route53_record
+  route53_zone_id       = var.route53_zone_id
+  
+  sns_topic_arn         = module.monitoring.sns_topic_arn
+  logs_retention_days   = var.logs_retention_days
+  
+  environment_variables = {
+    APP_ENV            = var.environment
+    BEDROCK_MODEL_ID   = var.bedrock_model_id
+    USE_S3             = "True"
+    S3_BUCKET          = module.storage.app_bucket_name
+    AWS_REGION         = var.aws_region
   }
-}
-
-# SNS Topic for Alarms
-resource "aws_sns_topic" "alerts" {
-  count = var.enable_sns_alerts ? 1 : 0
-  name  = "${var.environment}-alerts"
-}
-
-# SNS Topic Subscription
-resource "aws_sns_topic_subscription" "email_alerts" {
-  count     = var.enable_sns_alerts ? length(var.alert_email_addresses) : 0
-  topic_arn = aws_sns_topic.alerts[0].arn
-  protocol  = "email"
-  endpoint  = var.alert_email_addresses[count.index]
+  
+  tags = local.common_tags
 }

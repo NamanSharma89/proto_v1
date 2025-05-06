@@ -1,0 +1,7 @@
+# deploy/terraform/environments/backend-config/dev_cloud.hcl
+
+bucket         = "hospital-data-chatbot-terraform-state-dev"
+key            = "dev_cloud/terraform.tfstate"
+region         = "ap-south-1"
+dynamodb_table = "hospital-data-chatbot-terraform-locks-dev"
+encrypt        = true

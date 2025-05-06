@@ -1,15 +1,15 @@
 # Development environment configuration
 
-aws_region     = "us-east-1"
-aws_account_id = "123456789012" # Replace with your AWS account ID
+aws_region     = "ap-south-1"
+aws_account_id = "817019235550" # Replace with your AWS account ID
 environment    = "dev"
-project_name   = "myapp"
+project_name   = "hospital-data-chatbot"
 
 # Network configuration
 vpc_cidr             = "10.0.0.0/16"
 public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidrs = ["10.0.3.0/24", "10.0.4.0/24"]
-availability_zones   = ["us-east-1a", "us-east-1b"]
+availability_zones   = ["ap-south-1"]
 enable_nat_gateway   = true
 
 # Security configuration
@@ -29,4 +29,4 @@ ssh_key_name             = "dev-key"
 # Monitoring configuration
 cpu_alarm_threshold  = 80
 enable_sns_alerts    = true
-alert_email_addresses = ["dev-alerts@example.com"]
+alert_email_addresses = ["naman.sharma89@gmail.com"]

@@ -1,10 +1,10 @@
-name: Hospital Data Chatbot CI/CD
+name: Hospital Data Chatbot CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   workflow_dispatch:
     inputs:
       environment:
@@ -18,15 +18,14 @@ on:
           - prod
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REPOSITORY: hospital-data-chatbot
-  S3_BUCKET: hospital-data-chatbot-${{ github.event.inputs.environment || 'dev_cloud' }}
+  AWS_REGION: ap-south-1
+  PROJECT_NAME: hospital-data-chatbot
+  TERRAFORM_VERSION: '1.5.7'
 
 jobs:
   test:
-    name: Test
+    name: Run Tests
     runs-on: ubuntu-latest
-    
     services:
       postgres:
         image: postgres:14
@@ -42,122 +41,245 @@ jobs:
           --health-retries 5
     
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install uv
-      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - uses: actions/checkout@v3
       
-    - name: Install dependencies
-      run: |
-        uv venv
-        source .venv/bin/activate
-        uv pip install -e ".[dev]"
-    
-    - name: Run tests
-      run: |
-        source .venv/bin/activate
-        pytest tests/ --cov=app
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install uv
+        run: pip install uv
+      
+      - name: Setup virtual environment
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e ".[dev]"
+      
+      - name: Run linting
+        run: |
+          source .venv/bin/activate
+          flake8 app tests
+          black --check app tests
+          isort --check-only app tests
+      
+      - name: Run tests with coverage
+        run: |
+          source .venv/bin/activate
+          pytest tests/ --cov=app --cov-report=xml
+      
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
 
-  build:
-    name: Build and Push Docker Image
+  terraform:
+    name: Terraform Infrastructure
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      ecr_repository_url: ${{ steps.terraform-output.outputs.ecr_repository_url }}
+      db_endpoint: ${{ steps.terraform-output.outputs.db_endpoint }}
     
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-    
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
-    
-    - name: Build, tag, and push image to Amazon ECR
-      id: build-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-        ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod') || 'dev_cloud' }}
-      run: |
-        # Build the Docker image
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-          --build-arg APP_ENV=$ENVIRONMENT \
-          .
-        
-        # Push the Docker image
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        
-        # Also tag with environment and latest
-        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-latest
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-latest
-        
-        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-        echo "::set-output name=environment::$ENVIRONMENT"
-    
-    - name: Export environment for next jobs
-      run: |
-        echo "ENVIRONMENT=${{ steps.build-image.outputs.environment }}" >> $GITHUB_ENV
-        echo "IMAGE=${{ steps.build-image.outputs.image }}" >> $GITHUB_ENV
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Determine environment
+        id: environment
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ENV=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "ENV=prod" >> $GITHUB_ENV
+          else
+            echo "ENV=dev_cloud" >> $GITHUB_ENV
+          fi
+      
+      - name: Terraform Init
+        working-directory: deploy/terraform
+        run: |
+          if [ -f "environments/backend-config/${{ env.ENV }}.hcl" ]; then
+            terraform init -backend-config=environments/backend-config/${{ env.ENV }}.hcl -reconfigure
+          else
+            terraform init -reconfigure
+          fi
+      
+      - name: Terraform Validate
+        working-directory: deploy/terraform
+        run: terraform validate
+      
+      - name: Terraform Plan
+        working-directory: deploy/terraform
+        run: |
+          terraform plan \
+            -var-file=environments/${{ env.ENV }}.tfvars \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -out=tfplan
+      
+      - name: Terraform Apply
+        working-directory: deploy/terraform
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Terraform Output
+        id: terraform-output
+        working-directory: deploy/terraform
+        run: |
+          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          echo "db_endpoint=$(terraform output -raw db_endpoint)" >> $GITHUB_OUTPUT
+          echo "vpc_id=$(terraform output -raw vpc_id)" >> $GITHUB_OUTPUT
+          echo "s3_bucket_name=$(terraform output -raw s3_bucket_name)" >> $GITHUB_OUTPUT
 
-  deploy:
-    name: Deploy to AWS
-    needs: build
+  build-and-push:
+    name: Build and Push Docker Image
+    needs: terraform
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Determine environment
+        id: environment
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ENV=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "ENV=prod" >> $GITHUB_ENV
+          else
+            echo "ENV=dev_cloud" >> $GITHUB_ENV
+          fi
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+      - name: Extract repository name
+        run: |
+          REPO_URL="${{ needs.terraform.outputs.ecr_repository_url }}"
+          REPO_NAME=$(echo $REPO_URL | cut -d'/' -f2)
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
+      
+      - name: Build and tag Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build the Docker image
+          docker build -t $ECR_REGISTRY/${{ env.REPO_NAME }}:$IMAGE_TAG \
+            --build-arg APP_ENV=${{ env.ENV }} \
+            --build-arg BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0 \
+            .
+          
+          # Tag with environment and latest
+          docker tag $ECR_REGISTRY/${{ env.REPO_NAME }}:$IMAGE_TAG $ECR_REGISTRY/${{ env.REPO_NAME }}:${{ env.ENV }}-latest
+          
+          echo "image=$ECR_REGISTRY/${{ env.REPO_NAME }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image_latest=$ECR_REGISTRY/${{ env.REPO_NAME }}:${{ env.ENV }}-latest" >> $GITHUB_OUTPUT
+      
+      - name: Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker push ${{ steps.build-image.outputs.image }}
+          docker push ${{ steps.build-image.outputs.image_latest }}
+
+  deploy-app:
+    name: Deploy Application
+    needs: [terraform, build-and-push]
+    runs-on: ubuntu-latest
     
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-    
-    - name: Get DB Password from Secrets Manager
-      id: db-password
-      run: |
-        DB_PASSWORD=$(aws secretsmanager get-secret-value \
-          --secret-id hospital-chatbot/${{ env.ENVIRONMENT }}/db-credentials \
-          --query SecretString --output text | jq -r '.password')
-        echo "::set-output name=password::$DB_PASSWORD"
-    
-    - name: Deploy CloudFormation Stack
-      env:
-        STACK_NAME: hospital-chatbot-${{ env.ENVIRONMENT }}
-      run: |
-        aws cloudformation deploy \
-          --template-file deploy/cloudformation.yaml \
-          --stack-name $STACK_NAME \
-          --parameter-overrides \
-            Environment=${{ env.ENVIRONMENT }} \
-            ModelId=anthropic.claude-3-sonnet-20240229-v1:0 \
-            S3BucketName=hospital-data-chatbot \
-            DatabasePassword=${{ steps.db-password.outputs.password }} \
-          --capabilities CAPABILITY_IAM
-    
-    - name: Update SageMaker Endpoint with new image
-      run: |
-        # Get the model name from CloudFormation outputs
-        MODEL_NAME=$(aws cloudformation describe-stacks \
-          --stack-name hospital-chatbot-${{ env.ENVIRONMENT }} \
-          --query "Stacks[0].Outputs[?OutputKey=='SageMakerEndpointName'].OutputValue" \
-          --output text)
-        
-        if [ -n "$MODEL_NAME" ]; then
-          # Update the SageMaker model with the new image
-          aws sagemaker update-endpoint \
-            --endpoint-name $MODEL_NAME \
-            --endpoint-config-name $MODEL_NAME-config-${{ github.sha }}
-        fi
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Determine environment
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ENV=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "ENV=prod" >> $GITHUB_ENV
+          else
+            echo "ENV=dev_cloud" >> $GITHUB_ENV
+          fi
+      
+      - name: Terraform Init
+        working-directory: deploy/terraform
+        run: |
+          if [ -f "environments/backend-config/${{ env.ENV }}.hcl" ]; then
+            terraform init -backend-config=environments/backend-config/${{ env.ENV }}.hcl -reconfigure
+          else
+            terraform init -reconfigure
+          fi
+      
+      - name: Apply Deployment Configuration
+        working-directory: deploy/terraform
+        run: |
+          terraform apply \
+            -var-file=environments/${{ env.ENV }}.tfvars \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="image_tag=${{ github.sha }}" \
+            -auto-approve \
+            -target=module.app_deployment
+      
+      - name: Verify Deployment
+        run: |
+          # Wait for app to be available
+          APP_URL=$(terraform output -raw app_url)
+          
+          if [ -n "$APP_URL" ]; then
+            # Wait for the endpoint to be available (up to 5 minutes)
+            timeout=300
+            start_time=$(date +%s)
+            
+            echo "Waiting for application to be available..."
+            
+            while true; do
+              current_time=$(date +%s)
+              elapsed=$((current_time - start_time))
+              
+              if [ $elapsed -gt $timeout ]; then
+                echo "Timed out waiting for application"
+                exit 1
+              fi
+              
+              http_status=$(curl -s -o /dev/null -w "%{http_code}" $APP_URL/api/health || echo "000")
+              
+              if [ "$http_status" = "200" ]; then
+                echo "Application is available!"
+                break
+              fi
+              
+              echo "Application not available yet, waiting..."
+              sleep 10
+            done
+          else
+            echo "Application URL not available in outputs"
+          fi

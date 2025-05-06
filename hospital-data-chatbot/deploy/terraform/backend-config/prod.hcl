@@ -1,5 +1,7 @@
-bucket         = "myapp-terraform-state-prod"
+# deploy/terraform/environments/backend-config/prod.hcl
+
+bucket         = "hospital-data-chatbot-terraform-state-prod"
 key            = "prod/terraform.tfstate"
-region         = "us-east-1"
-dynamodb_table = "myapp-terraform-locks-prod"
+region         = "ap-south-1"
+dynamodb_table = "hospital-data-chatbot-terraform-locks-prod"
 encrypt        = true

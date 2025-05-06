@@ -14,6 +14,10 @@ APPLY_ARGS=""
 DESTROY_ARGS=""
 VERBOSE=false
 
+# Set your default AWS profile here
+DEFAULT_AWS_PROFILE="nash-cli-1"  # <-- Set your existing profile name here
+AWS_PROFILE=${AWS_PROFILE:-$DEFAULT_AWS_PROFILE}
+
 # Function to display usage information
 function show_usage() {
     echo "Usage: $0 [OPTIONS] COMMAND"
@@ -37,6 +41,7 @@ function show_usage() {
     echo "  -a, --auto-approve    Skip interactive approval for apply/destroy"
     echo "  -v, --verbose         Show detailed output"
     echo "  -h, --help            Display this help message"
+    echo "  --profile PROFILE     AWS profile to use (default: $DEFAULT_AWS_PROFILE)"
     echo ""
     echo "Examples:"
     echo "  $0 init                         # Initialize Terraform"
@@ -44,6 +49,22 @@ function show_usage() {
     echo "  $0 -a destroy                   # Destroy infra without confirmation"
     echo "  $0 -e staging -a all            # Full deployment to staging"
     echo ""
+}
+
+# Function to set up AWS profile
+function setup_aws_profile() {
+    export AWS_PROFILE="$AWS_PROFILE"
+    echo "Using AWS profile: $AWS_PROFILE"
+    
+    # Verify the profile works
+    if aws sts get-caller-identity &>/dev/null; then
+        echo "✅ AWS profile verified successfully"
+        aws sts get-caller-identity --query "Account" --output text
+    else
+        echo "❌ AWS profile verification failed"
+        echo "Please check that your AWS profile '$AWS_PROFILE' is configured correctly"
+        exit 1
+    fi
 }
 
 # Parse command line arguments
@@ -65,6 +86,10 @@ while [[ $# -gt 0 ]]; do
         -v|--verbose)
             VERBOSE=true
             shift
+            ;;
+        --profile)
+            AWS_PROFILE="$2"
+            shift 2
             ;;
         -h|--help)
             show_usage
@@ -96,6 +121,9 @@ if [ ! -d "$TF_DIR" ]; then
     exit 1
 fi
 
+# Set up AWS profile
+setup_aws_profile
+
 # Change to terraform directory
 cd "$TF_DIR"
 
@@ -111,6 +139,13 @@ TF_VAR_FILE=""
 if [ -f "environments/${ENV}.tfvars" ]; then
     TF_VAR_FILE="-var-file=environments/${ENV}.tfvars"
     echo "Using environment config: environments/${ENV}.tfvars"
+fi
+
+# Set backend configuration if available
+BACKEND_CONFIG=""
+if [ -f "environments/backend-config/${ENV}.hcl" ]; then
+    BACKEND_CONFIG="-backend-config=environments/backend-config/${ENV}.hcl"
+    echo "Using backend config: environments/backend-config/${ENV}.hcl"
 fi
 
 # Function to calculate elapsed time
@@ -153,7 +188,13 @@ echo "======================================================"
 
 case "$COMMAND" in
     init)
-        run_terraform "init" "-reconfigure"
+        INIT_ARGS=""
+        if [ -n "$BACKEND_CONFIG" ]; then
+            INIT_ARGS="$BACKEND_CONFIG -reconfigure"
+        else
+            INIT_ARGS="-reconfigure"
+        fi
+        run_terraform "init" "$INIT_ARGS"
         ;;
     plan)
         run_terraform "plan" "$TF_VAR_FILE"
@@ -194,7 +235,14 @@ case "$COMMAND" in
         ;;
     all)
         echo "🔄 Running full deployment pipeline..."
-        run_terraform "init" "-reconfigure" && \
+        INIT_ARGS=""
+        if [ -n "$BACKEND_CONFIG" ]; then
+            INIT_ARGS="$BACKEND_CONFIG -reconfigure"
+        else
+            INIT_ARGS="-reconfigure"
+        fi
+        
+        run_terraform "init" "$INIT_ARGS" && \
         run_terraform "validate" "" && \
         run_terraform "plan" "$TF_VAR_FILE" && \
         run_terraform "apply" "$TF_VAR_FILE $APPLY_ARGS"
