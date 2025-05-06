@@ -1,0 +1,163 @@
+name: Hospital Data Chatbot CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev_cloud'
+        type: choice
+        options:
+          - dev_cloud
+          - stage
+          - prod
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: hospital-data-chatbot
+  S3_BUCKET: hospital-data-chatbot-${{ github.event.inputs.environment || 'dev_cloud' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hospital_data_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      
+    - name: Install dependencies
+      run: |
+        uv venv
+        source .venv/bin/activate
+        uv pip install -e ".[dev]"
+    
+    - name: Run tests
+      run: |
+        source .venv/bin/activate
+        pytest tests/ --cov=app
+
+  build:
+    name: Build and Push Docker Image
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+    
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+        ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod') || 'dev_cloud' }}
+      run: |
+        # Build the Docker image
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+          --build-arg APP_ENV=$ENVIRONMENT \
+          .
+        
+        # Push the Docker image
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        
+        # Also tag with environment and latest
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$ENVIRONMENT-latest
+        
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        echo "::set-output name=environment::$ENVIRONMENT"
+    
+    - name: Export environment for next jobs
+      run: |
+        echo "ENVIRONMENT=${{ steps.build-image.outputs.environment }}" >> $GITHUB_ENV
+        echo "IMAGE=${{ steps.build-image.outputs.image }}" >> $GITHUB_ENV
+
+  deploy:
+    name: Deploy to AWS
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Get DB Password from Secrets Manager
+      id: db-password
+      run: |
+        DB_PASSWORD=$(aws secretsmanager get-secret-value \
+          --secret-id hospital-chatbot/${{ env.ENVIRONMENT }}/db-credentials \
+          --query SecretString --output text | jq -r '.password')
+        echo "::set-output name=password::$DB_PASSWORD"
+    
+    - name: Deploy CloudFormation Stack
+      env:
+        STACK_NAME: hospital-chatbot-${{ env.ENVIRONMENT }}
+      run: |
+        aws cloudformation deploy \
+          --template-file deploy/cloudformation.yaml \
+          --stack-name $STACK_NAME \
+          --parameter-overrides \
+            Environment=${{ env.ENVIRONMENT }} \
+            ModelId=anthropic.claude-3-sonnet-20240229-v1:0 \
+            S3BucketName=hospital-data-chatbot \
+            DatabasePassword=${{ steps.db-password.outputs.password }} \
+          --capabilities CAPABILITY_IAM
+    
+    - name: Update SageMaker Endpoint with new image
+      run: |
+        # Get the model name from CloudFormation outputs
+        MODEL_NAME=$(aws cloudformation describe-stacks \
+          --stack-name hospital-chatbot-${{ env.ENVIRONMENT }} \
+          --query "Stacks[0].Outputs[?OutputKey=='SageMakerEndpointName'].OutputValue" \
+          --output text)
+        
+        if [ -n "$MODEL_NAME" ]; then
+          # Update the SageMaker model with the new image
+          aws sagemaker update-endpoint \
+            --endpoint-name $MODEL_NAME \
+            --endpoint-config-name $MODEL_NAME-config-${{ github.sha }}
+        fi
