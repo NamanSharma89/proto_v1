@@ -3,7 +3,7 @@
 aws_region     = "ap-south-1"
 aws_account_id = "817019235550" # Replace with your AWS account ID
 environment    = "dev"
-project_name   = "hospital-data-chatbot"
+project_name   = "hdc"
 
 # Network configuration
 vpc_cidr             = "10.0.0.0/16"

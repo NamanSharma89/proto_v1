@@ -15,6 +15,7 @@ This repository contains a comprehensive AWS infrastructure management system po
 - **Consistent Configuration**: Ensure infrastructure consistency across all environments
 - **Complete AWS Stack**: Includes VPC, subnets, security groups, EC2 instances, S3 buckets, and monitoring
 - **Scalable Architecture**: Easily extend with additional AWS resources as needed
+- **AI/ML Integration**: Built-in support for AWS Bedrock and SageMaker
 
 ## 📂 Repository Structure
 
@@ -32,6 +33,15 @@ terraform/
 │       ├── dev.hcl        # Remote state config for development
 │       ├── staging.hcl    # Remote state config for staging
 │       └── prod.hcl       # Remote state config for production
+├── modules/               # Reusable Terraform modules
+│   ├── networking/        # VPC, subnets, security groups
+│   ├── database/          # RDS PostgreSQL configuration
+│   ├── storage/           # S3 buckets, ECR repositories
+│   ├── app_deployment/    # ECS Fargate, ALB, auto-scaling
+│   ├── monitoring/        # CloudWatch, SNS
+│   ├── bedrock/           # AI model integration
+│   └── sagemaker/         # ML infrastructure
+├── bootstrap.sh           # Script to initialize backend infrastructure
 └── terraform-infra-manager.sh  # Management script
 ```
 
@@ -52,10 +62,10 @@ git clone https://github.com/your-org/aws-terraform-infra.git
 cd aws-terraform-infra
 ```
 
-2. **Make the management script executable**
+2. **Make the management scripts executable**
 
 ```bash
-chmod +x terraform-infra-manager.sh
+chmod +x terraform-infra-manager.sh bootstrap.sh
 ```
 
 3. **Set up AWS credentials**
@@ -89,7 +99,15 @@ Add to your `.gitignore`:
 .awsconfig
 ```
 
-4. **Update configuration files**
+4. **Bootstrap your Terraform state infrastructure**
+
+```bash
+./bootstrap.sh --environment dev-cloud --region ap-south-1 --profile your-aws-profile
+```
+
+This sets up the required S3 bucket and DynamoDB table for Terraform state management.
+
+5. **Update configuration files**
 
 Modify the `.tfvars` files in the `environments` directory to match your requirements:
 - Update AWS region and account ID
@@ -97,79 +115,159 @@ Modify the `.tfvars` files in the `environments` directory to match your require
 - Set appropriate security group rules
 - Adjust instance types and counts for each environment
 
-5. **Initialize Terraform**
+6. **Set up sensitive variables**
+
+```bash
+# Edit terraform-secrets.sh with appropriate values
+vim terraform-secrets.sh
+
+# Make it executable
+chmod +x terraform-secrets.sh
+
+# Source it before running terraform commands
+source ./terraform-secrets.sh
+```
+
+7. **Initialize Terraform**
 
 ```bash
 ./terraform-infra-manager.sh init
 ```
 
-6. **Deploy to your desired environment**
+8. **Deploy to your desired environment**
 
 ```bash
-./terraform-infra-manager.sh -e dev apply
+./terraform-infra-manager.sh -e dev-cloud apply
 ```
 
-## 🌟 Usage Examples
+## 🌟 terraform-infra-manager.sh
 
-### Initialize Terraform
+The `terraform-infra-manager.sh` script is a powerful utility for managing your Terraform infrastructure. It provides a streamlined workflow for initializing, planning, applying, and destroying infrastructure across different environments.
+
+### Key Features
+
+- **Environment Management**: Easily switch between development, staging, and production environments
+- **AWS Profile Handling**: Use different AWS credentials for different environments
+- **S3 Backend Verification**: Automatically checks for and offers to create required S3 buckets
+- **DynamoDB State Locking**: Ensures safe concurrent access to Terraform state
+- **Performance Timing**: Tracks and reports the duration of Terraform operations
+- **Verbose Mode**: Provides detailed output for troubleshooting
+- **Backend Configuration**: Automatically manages backend configurations for different environments
+- **Auto-approve Option**: Supports non-interactive deployment for CI/CD pipelines
+- **Full Command Support**: Supports all Terraform commands including initialization, plan, apply, destroy, and more
+
+### Script Usage
 
 ```bash
-./terraform-infra-manager.sh init
+Usage: ./terraform-infra-manager.sh [OPTIONS] COMMAND
+
+A utility script to manage Terraform infrastructure
+
+Commands:
+  init        Initialize Terraform working directory
+  plan        Generate and show an execution plan
+  apply       Build or change infrastructure
+  destroy     Destroy previously-created infrastructure
+  output      Show output values from your root module
+  validate    Check whether the configuration is valid
+  workspace   Switch between workspaces
+  fmt         Reformat your configuration in the standard style
+  all         Run init, validate, plan, and apply in sequence
+
+Options:
+  -d, --directory DIR   Terraform directory (default: ./terraform)
+  -e, --environment ENV Environment to deploy (dev-cloud, staging, prod)
+  -a, --auto-approve    Skip interactive approval for apply/destroy
+  -v, --verbose         Show detailed output
+  -h, --help            Display this help message
+  --profile PROFILE     AWS profile to use (default: Your configured profile)
 ```
 
-### View Execution Plan
+### Advanced Features
+
+#### S3 Bucket and DynamoDB Table Management
+
+The script automatically checks if the required S3 bucket and DynamoDB table for Terraform state management exist:
 
 ```bash
-./terraform-infra-manager.sh -e staging plan
+# S3 bucket check
+BUCKET_NAME="${PROJECT_NAME}-terraform-state-${BUCKET_ENV}-${AWS_ACCOUNT_ID}"
+if check_s3_bucket_exists "$BUCKET_NAME" "$AWS_REGION"; then
+    echo "✅ S3 bucket '$BUCKET_NAME' exists and is accessible"
+else
+    echo "⚠️ S3 bucket '$BUCKET_NAME' does not exist or is not accessible"
+    read -p "Do you want to create the S3 bucket? (y/n): " CREATE_BUCKET
+    # ... bucket creation logic ...
+fi
+
+# DynamoDB table check
+DYNAMO_TABLE="${PROJECT_NAME}-terraform-locks-${BUCKET_ENV}"
+if aws dynamodb describe-table --table-name "$DYNAMO_TABLE" --region "$AWS_REGION" &>/dev/null; then
+    echo "✅ DynamoDB table '$DYNAMO_TABLE' exists and is accessible"
+else
+    echo "⚠️ DynamoDB table '$DYNAMO_TABLE' does not exist or is not accessible"
+    # ... table creation logic ...
+fi
 ```
 
-### Deploy Infrastructure
+#### Backend Configuration Generation
+
+The script automatically generates the correct backend configuration for each environment:
 
 ```bash
-./terraform-infra-manager.sh -e prod apply
+# Create backend config with or without DynamoDB table
+if [ "$DYNAMO_TABLE_EXISTS" = true ]; then
+    cat > "$BACKEND_DIR/${ENV}.hcl" << EOF
+bucket         = "${BUCKET_NAME}"
+key            = "${ENV}/terraform.tfstate"
+region         = "${AWS_REGION}"
+dynamodb_table = "${DYNAMO_TABLE}"
+encrypt        = true
+EOF
+else
+    # ... simplified config ...
+fi
 ```
 
-### Auto-Approve Changes
+#### Performance Tracking
+
+The script includes built-in timing functionality to track the duration of Terraform operations:
 
 ```bash
-./terraform-infra-manager.sh -e dev -a apply
+function timer() {
+    if [[ $# -eq 0 ]]; then
+        echo $(date '+%s')
+    else
+        local start_time=$1
+        local end_time=$(date '+%s')
+        local elapsed=$((end_time - start_time))
+        local mins=$((elapsed / 60))
+        local secs=$((elapsed % 60))
+        echo "Time elapsed: ${mins}m ${secs}s"
+    fi
+}
+
+# Usage within the script
+start_time=$(timer)
+terraform $cmd $args
+timer $start_time
 ```
 
-### Destroy Infrastructure
+#### Full Deployment Pipeline
+
+The script supports a complete deployment pipeline with a single command:
 
 ```bash
-./terraform-infra-manager.sh -e dev destroy
+./terraform-infra-manager.sh -e dev-cloud all
 ```
 
-### Run Full Deployment Pipeline
-
-```bash
-./terraform-infra-manager.sh -e staging -a all
-```
-
-### View Infrastructure Outputs
-
-```bash
-./terraform-infra-manager.sh -e prod output
-```
-
-### Format Terraform Files
-
-```bash
-./terraform-infra-manager.sh fmt
-```
-
-### Switch Workspace
-
-```bash
-./terraform-infra-manager.sh workspace
-```
+This runs `init`, `validate`, `plan`, and `apply` in sequence, providing a complete deployment workflow.
 
 ## 🔄 Deployment Workflow
 
 1. **Development First**: Deploy changes to the development environment
    ```bash
-   ./terraform-infra-manager.sh -e dev apply
+   ./terraform-infra-manager.sh -e dev-cloud apply
    ```
 
 2. **Validate in Staging**: Once tested in development, promote to staging
@@ -188,13 +286,13 @@ This infrastructure uses remote state management to enable team collaboration:
 
 ```bash
 # Initialize with remote state for development
-terraform init -backend-config=environments/backend-config/dev.hcl
+./terraform-infra-manager.sh -e dev-cloud init
 
 # Initialize with remote state for staging
-terraform init -backend-config=environments/backend-config/staging.hcl
+./terraform-infra-manager.sh -e staging init
 
 # Initialize with remote state for production
-terraform init -backend-config=environments/backend-config/prod.hcl
+./terraform-infra-manager.sh -e prod init
 ```
 
 ## 📊 Infrastructure Visualization
@@ -248,7 +346,7 @@ Use AWS profiles for the most secure approach:
 aws configure --profile terraform-admin
 
 # Use the profile with the script
-./terraform-infra-manager.sh --profile terraform-admin -e dev apply
+./terraform-infra-manager.sh --profile terraform-admin -e dev-cloud apply
 ```
 
 #### 2. Environment Variables
@@ -261,7 +359,7 @@ export AWS_SECRET_ACCESS_KEY="your-secret-key"
 export AWS_DEFAULT_REGION="us-east-1"
 
 # Then run the script normally
-./terraform-infra-manager.sh -e dev apply
+./terraform-infra-manager.sh -e dev-cloud apply
 ```
 
 #### 3. Configuration File
@@ -315,13 +413,95 @@ If running on EC2, use IAM roles for best security:
   aws sts get-caller-identity
   ```
 
+- **Permission Issues**: Ensure your AWS identity has the necessary permissions:
+  ```bash
+  # Example error
+  Error: creating ECS Cluster: AccessDeniedException: User is not authorized to perform: ecs:CreateCluster
+  ```
+  
+  Solution: Add the required permissions to your IAM user/role or use a role with appropriate permissions.
+
 ### Debugging
 
 Enable verbose logging for more detailed output:
 
 ```bash
-./terraform-infra-manager.sh -v -e dev plan
+./terraform-infra-manager.sh -v -e dev-cloud plan
 ```
+
+### Required AWS Permissions
+
+To run the infrastructure deployment, your AWS identity needs the following permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*",
+        "rds:*",
+        "s3:*",
+        "ecr:*",
+        "ecs:*",
+        "elasticloadbalancing:*",
+        "application-autoscaling:*",
+        "cloudwatch:*",
+        "logs:*",
+        "sns:*",
+        "secretsmanager:*",
+        "sagemaker:*",
+        "bedrock:*",
+        "dynamodb:*",
+        "route53:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:PutRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:TagRole",
+        "iam:ListRoleTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::ACCOUNT_ID:role/PROJECT_NAME-*-ecs-execution-role",
+        "arn:aws:iam::ACCOUNT_ID:role/PROJECT_NAME-*-ecs-task-role",
+        "arn:aws:iam::ACCOUNT_ID:role/PROJECT_NAME-*-bedrock-role",
+        "arn:aws:iam::ACCOUNT_ID:role/PROJECT_NAME-*-sagemaker-role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "ecs.amazonaws.com",
+            "ecs-tasks.amazonaws.com",
+            "bedrock.amazonaws.com",
+            "sagemaker.amazonaws.com",
+            "lambda.amazonaws.com",
+            "monitoring.rds.amazonaws.com"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+Replace `ACCOUNT_ID` with your AWS account ID and `PROJECT_NAME` with your project name.
 
 ## 📝 Contributing
 

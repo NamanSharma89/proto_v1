@@ -6,7 +6,7 @@ aws_region          = "ap-south-1"
 
 # Network configuration
 vpc_cidr            = "10.0.0.0/16"
-availability_zones  = ["ap-south-1a"]
+availability_zones  = ["ap-south-1a","ap-south-1b"]
 enable_nat_gateway  = false
 
 # Database configuration

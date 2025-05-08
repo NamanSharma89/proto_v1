@@ -3,7 +3,7 @@
 variable "project_name" {
   description = "Name of the project"
   type        = string
-  default     = "hospital-data-chatbot"
+  default     = "hdc"
 }
 
 variable "environment" {
@@ -177,12 +177,4 @@ variable "additional_tags" {
   description = "Additional tags to apply to all resources"
   type        = map(string)
   default     = {}
-}
-
-# The following variable is explicitly mentioned in your code
-# but might not be in your variables.tf file
-variable "image_tag" {
-  description = "Docker image tag to deploy"
-  type        = string
-  default     = "latest"
 }

@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # terraform-infra-manager.sh - A script to manage AWS infrastructure with Terraform
-# Author: Claude
+# Modified to check for existing S3 bucket
 
 # Set script to exit on error
 set -e
 
 # Default values
 TF_DIR="./terraform"
-ENV="dev"
+ENV="dev-cloud"
 COMMAND=""
 APPLY_ARGS=""
 DESTROY_ARGS=""
@@ -37,7 +37,7 @@ function show_usage() {
     echo ""
     echo "Options:"
     echo "  -d, --directory DIR   Terraform directory (default: ./terraform)"
-    echo "  -e, --environment ENV Environment to deploy (dev, staging, prod)"
+    echo "  -e, --environment ENV Environment to deploy (dev-cloud, staging, prod)"
     echo "  -a, --auto-approve    Skip interactive approval for apply/destroy"
     echo "  -v, --verbose         Show detailed output"
     echo "  -h, --help            Display this help message"
@@ -64,6 +64,19 @@ function setup_aws_profile() {
         echo "❌ AWS profile verification failed"
         echo "Please check that your AWS profile '$AWS_PROFILE' is configured correctly"
         exit 1
+    fi
+}
+
+# Function to check if S3 bucket exists
+function check_s3_bucket_exists() {
+    local bucket_name="$1"
+    local region="$2"
+    
+    # Use head-bucket command to check if bucket exists and we have access to it
+    if aws s3api head-bucket --bucket "$bucket_name" --region "$region" 2>/dev/null; then
+        return 0  # Bucket exists and we have access
+    else
+        return 1  # Bucket doesn't exist or we don't have access
     fi
 }
 
@@ -124,6 +137,104 @@ fi
 # Set up AWS profile
 setup_aws_profile
 
+# Get AWS account ID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+echo "AWS Account ID: $AWS_ACCOUNT_ID"
+
+# Get AWS region
+AWS_REGION=$(aws configure get region --profile "$AWS_PROFILE" || echo "ap-south-1")
+echo "AWS Region: $AWS_REGION"
+
+# Sanitize environment name (replace underscores with hyphens)
+BUCKET_ENV=$(echo ${ENV} | tr '_' '-' | tr '[:upper:]' '[:lower:]')
+PROJECT_NAME=$(basename $(pwd) | tr '_' '-' | tr '[:upper:]' '[:lower:]')
+if [ -z "$PROJECT_NAME" ] || [ "$PROJECT_NAME" == "." ]; then
+    PROJECT_NAME="hospital-data-chatbot"
+fi
+
+# Construct bucket name following the same pattern as bootstrap.sh
+BUCKET_NAME="${PROJECT_NAME}-terraform-state-${BUCKET_ENV}-${AWS_ACCOUNT_ID}"
+echo "S3 bucket name: $BUCKET_NAME"
+
+# Check if S3 bucket exists
+if check_s3_bucket_exists "$BUCKET_NAME" "$AWS_REGION"; then
+    echo "✅ S3 bucket '$BUCKET_NAME' exists and is accessible"
+    S3_BUCKET_EXISTS=true
+else
+    echo "⚠️ S3 bucket '$BUCKET_NAME' does not exist or is not accessible"
+    
+    # Ask if user wants to create it
+    read -p "Do you want to create the S3 bucket? (y/n): " CREATE_BUCKET
+    if [[ "$CREATE_BUCKET" =~ ^[Yy]$ ]]; then
+        echo "Creating S3 bucket: $BUCKET_NAME"
+        aws s3 mb s3://$BUCKET_NAME --region $AWS_REGION
+        
+        echo "Enabling versioning on S3 bucket..."
+        aws s3api put-bucket-versioning \
+          --bucket $BUCKET_NAME \
+          --versioning-configuration Status=Enabled \
+          --region $AWS_REGION
+        
+        S3_BUCKET_EXISTS=true
+    else
+        echo "⚠️ Cannot proceed without S3 bucket for Terraform state"
+        exit 1
+    fi
+fi
+
+# Check for DynamoDB table
+DYNAMO_TABLE="${PROJECT_NAME}-terraform-locks-${BUCKET_ENV}"
+if aws dynamodb describe-table --table-name "$DYNAMO_TABLE" --region "$AWS_REGION" &>/dev/null; then
+    echo "✅ DynamoDB table '$DYNAMO_TABLE' exists and is accessible"
+    DYNAMO_TABLE_EXISTS=true
+else
+    echo "⚠️ DynamoDB table '$DYNAMO_TABLE' does not exist or is not accessible"
+    
+    # Ask if user wants to create it
+    read -p "Do you want to create the DynamoDB table for state locking? (y/n): " CREATE_TABLE
+    if [[ "$CREATE_TABLE" =~ ^[Yy]$ ]]; then
+        echo "Creating DynamoDB table: $DYNAMO_TABLE"
+        aws dynamodb create-table \
+          --table-name $DYNAMO_TABLE \
+          --attribute-definitions AttributeName=LockID,AttributeType=S \
+          --key-schema AttributeName=LockID,KeyType=HASH \
+          --billing-mode PAY_PER_REQUEST \
+          --region $AWS_REGION
+        
+        DYNAMO_TABLE_EXISTS=true
+    else
+        echo "⚠️ Warning: Proceeding without DynamoDB table for state locking"
+        echo "Multiple users may modify infrastructure simultaneously, which could cause conflicts"
+    fi
+fi
+
+# Ensure backend config directory exists
+BACKEND_DIR="$TF_DIR/environments/backend-config"
+mkdir -p "$BACKEND_DIR"
+
+# Create or update backend config
+if [ "$S3_BUCKET_EXISTS" = true ]; then
+    # Create backend config with or without DynamoDB table
+    if [ "$DYNAMO_TABLE_EXISTS" = true ]; then
+        cat > "$BACKEND_DIR/${ENV}.hcl" << EOF
+bucket         = "${BUCKET_NAME}"
+key            = "${ENV}/terraform.tfstate"
+region         = "${AWS_REGION}"
+dynamodb_table = "${DYNAMO_TABLE}"
+encrypt        = true
+EOF
+    else
+        cat > "$BACKEND_DIR/${ENV}.hcl" << EOF
+bucket         = "${BUCKET_NAME}"
+key            = "${ENV}/terraform.tfstate"
+region         = "${AWS_REGION}"
+encrypt        = true
+EOF
+    fi
+    
+    echo "✅ Created/updated backend config: $BACKEND_DIR/${ENV}.hcl"
+fi
+
 # Change to terraform directory
 cd "$TF_DIR"
 
@@ -167,7 +278,7 @@ function run_terraform() {
     local cmd="$1"
     local args="$2"
     
-    echo "⚙️  Running: terraform $cmd $args"
+    echo "⚙️ Running: terraform $cmd $args"
     start_time=$(timer)
     
     # Execute the command
@@ -203,7 +314,7 @@ case "$COMMAND" in
         run_terraform "apply" "$TF_VAR_FILE $APPLY_ARGS"
         ;;
     destroy)
-        echo "⚠️  WARNING: This will destroy all resources in the $ENV environment! ⚠️"
+        echo "⚠️ WARNING: This will destroy all resources in the $ENV environment! ⚠️"
         if [ -z "$DESTROY_ARGS" ]; then
             read -p "Are you absolutely sure? Type 'yes' to confirm: " confirm
             if [ "$confirm" != "yes" ]; then

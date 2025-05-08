@@ -37,3 +37,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "bedrock_model_units" {
+  description = "Number of model units to provision for Bedrock"
+  type        = number
+  default     = 1
+}
+
+variable "provision_dedicated_throughput" {
+  description = "Whether to provision dedicated throughput for the Bedrock model"
+  type        = bool
+  default     = false
+}

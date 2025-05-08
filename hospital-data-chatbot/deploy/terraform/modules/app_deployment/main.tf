@@ -9,9 +9,12 @@ resource "aws_ecs_cluster" "main" {
     value = var.environment == "prod" ? "enabled" : "disabled"
   }
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-cluster"
-  }
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-cluster"
+    },
+    var.tags
+  )
 }
 
 # Create a Task Definition
@@ -81,9 +84,12 @@ resource "aws_ecs_task_definition" "app" {
     }
   ])
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-task"
-  }
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-task"
+    },
+    var.tags
+  )
 }
 
 # Create IAM roles for ECS
@@ -103,9 +109,12 @@ resource "aws_iam_role" "ecs_execution" {
     ]
   })
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-ecs-execution-role"
-  }
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-ecs-execution-role"
+    },
+    var.tags
+  )
 }
 
 resource "aws_iam_role" "ecs_task" {
@@ -124,9 +133,12 @@ resource "aws_iam_role" "ecs_task" {
     ]
   })
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-ecs-task-role"
-  }
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-ecs-task-role"
+    },
+    var.tags
+  )
 }
 
 # Attach policies to roles
@@ -183,9 +195,12 @@ resource "aws_cloudwatch_log_group" "app_logs" {
   name              = "/ecs/${var.project_name}-${var.environment}"
   retention_in_days = var.environment == "prod" ? 30 : 7
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-logs"
-  }
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-logs"
+    },
+    var.tags
+  )
 }
 
 # Create ALB
@@ -198,9 +213,12 @@ resource "aws_lb" "app" {
 
   enable_deletion_protection = var.environment == "prod"
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-alb"
-  }
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-alb"
+    },
+    var.tags
+  )
 }
 
 resource "aws_lb_target_group" "app" {
@@ -222,13 +240,47 @@ resource "aws_lb_target_group" "app" {
     matcher             = "200"
   }
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-tg"
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-tg"
+    },
+    var.tags
+  )
+}
+
+# HTTP listener - always created
+# Serves traffic directly if no HTTPS, redirects to HTTPS if certificate exists
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.app.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = local.use_https ? "redirect" : "forward"
+
+    dynamic "redirect" {
+      for_each = local.use_https ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+
+    dynamic "forward" {
+      for_each = local.use_https ? [] : [1]
+      content {
+        target_group {
+          arn = aws_lb_target_group.app.arn
+        }
+      }
+    }
   }
 }
 
+# HTTPS listener - only created if certificate ARN is provided
 resource "aws_lb_listener" "https" {
-  count = var.acm_certificate_arn != "" ? 1 : 0
+  count = local.use_https ? 1 : 0
   
   load_balancer_arn = aws_lb.app.arn
   port              = 443
@@ -242,30 +294,18 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# Add this HTTP-only listener when no certificate is provided
-resource "aws_lb_listener" "http_only" {
-  count = var.acm_certificate_arn == "" ? 1 : 0
-  
-  load_balancer_arn = aws_lb.app.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.app.arn
-  }
-}
-
 # Create ECS Service
-resource "aws_ecs_service" "app" {
-  name                               = "${var.project_name}-${var.environment}-service"
-  cluster                            = aws_ecs_cluster.main.id
-  task_definition                    = aws_ecs_task_definition.app.arn
-  desired_count                      = var.desired_count
-  launch_type                        = "FARGATE"
-  scheduling_strategy                = "REPLICA"
-  health_check_grace_period_seconds  = 60
-  force_new_deployment               = true
+# Fixing the depends_on issue by using separate services based on HTTPS availability
+resource "aws_ecs_service" "app_https" {
+  count                             = local.use_https ? 1 : 0
+  name                              = "${var.project_name}-${var.environment}-service"
+  cluster                           = aws_ecs_cluster.main.id
+  task_definition                   = aws_ecs_task_definition.app.arn
+  desired_count                     = var.desired_count
+  launch_type                       = "FARGATE"
+  scheduling_strategy               = "REPLICA"
+  health_check_grace_period_seconds = 60
+  force_new_deployment              = true
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -284,20 +324,61 @@ resource "aws_ecs_service" "app" {
     rollback = true
   }
 
-  tags = {
-    Name = "${var.project_name}-${var.environment}-service"
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-service"
+    },
+    var.tags
+  )
+
+  # Now using a direct resource reference, which is valid for depends_on
+  depends_on = [aws_lb_listener.https[0]]
+}
+
+resource "aws_ecs_service" "app_http" {
+  count                             = local.use_https ? 0 : 1
+  name                              = "${var.project_name}-${var.environment}-service"
+  cluster                           = aws_ecs_cluster.main.id
+  task_definition                   = aws_ecs_task_definition.app.arn
+  desired_count                     = var.desired_count
+  launch_type                       = "FARGATE"
+  scheduling_strategy               = "REPLICA"
+  health_check_grace_period_seconds = 60
+  force_new_deployment              = true
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.app_security_group_id]
+    assign_public_ip = false
   }
 
-  depends_on = [
-    var.acm_certificate_arn != "" ? aws_lb_listener.https[0] : aws_lb_listener.http_only[0]
-  ]
+  load_balancer {
+    target_group_arn = aws_lb_target_group.app.arn
+    container_name   = "${var.project_name}-${var.environment}-container"
+    container_port   = 8080
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  tags = merge(
+    {
+      Name = "${var.project_name}-${var.environment}-service"
+    },
+    var.tags
+  )
+
+  # Using a direct resource reference, which is valid for depends_on
+  depends_on = [aws_lb_listener.http]
 }
 
 # Auto-scaling
 resource "aws_appautoscaling_target" "app" {
   max_capacity       = var.max_capacity
   min_capacity       = var.min_capacity
-  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.app.name}"
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${local.app_service_name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
 }
@@ -352,7 +433,7 @@ resource "aws_cloudwatch_metric_alarm" "service_high_cpu" {
   
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name
-    ServiceName = aws_ecs_service.app.name
+    ServiceName = local.app_service_name
   }
 }
 
@@ -371,6 +452,6 @@ resource "aws_cloudwatch_metric_alarm" "service_high_memory" {
   
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name
-    ServiceName = aws_ecs_service.app.name
+    ServiceName = local.app_service_name
   }
 }

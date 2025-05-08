@@ -17,7 +17,7 @@ output "ecs_cluster_name" {
 
 output "ecs_service_name" {
   description = "The name of the ECS service"
-  value       = aws_ecs_service.app.name
+  value       = local.use_https ? aws_ecs_service.app_https[0].name : aws_ecs_service.app_http[0].name
 }
 
 output "target_group_arn" {
