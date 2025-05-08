@@ -52,7 +52,7 @@ output "app_url" {
 
 output "notebook_url" {
   description = "The URL of the SageMaker notebook instance (dev environment only)"
-  value       = var.enable_ml && var.environment == "dev_cloud" ? module.sagemaker[0].notebook_url : null
+  value       = var.enable_ml && var.environment == "dev-cloud" ? module.sagemaker[0].notebook_url : null
 }
 
 output "sns_topic_arn" {

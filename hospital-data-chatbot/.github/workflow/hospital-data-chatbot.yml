@@ -10,10 +10,10 @@ on:
       environment:
         description: 'Environment to deploy to'
         required: true
-        default: 'dev_cloud'
+        default: 'dev-cloud'
         type: choice
         options:
-          - dev_cloud
+          - dev-cloud
           - stage
           - prod
 
@@ -107,7 +107,7 @@ jobs:
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "ENV=prod" >> $GITHUB_ENV
           else
-            echo "ENV=dev_cloud" >> $GITHUB_ENV
+            echo "ENV=dev-cloud" >> $GITHUB_ENV
           fi
       
       - name: Terraform Init
@@ -167,7 +167,7 @@ jobs:
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "ENV=prod" >> $GITHUB_ENV
           else
-            echo "ENV=dev_cloud" >> $GITHUB_ENV
+            echo "ENV=dev-cloud" >> $GITHUB_ENV
           fi
       
       - name: Login to Amazon ECR
@@ -227,7 +227,7 @@ jobs:
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "ENV=prod" >> $GITHUB_ENV
           else
-            echo "ENV=dev_cloud" >> $GITHUB_ENV
+            echo "ENV=dev-cloud" >> $GITHUB_ENV
           fi
       
       - name: Terraform Init

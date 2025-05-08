@@ -7,7 +7,7 @@ WORKDIR /app
 RUN pip install uv
 
 # Set default environment (will be overridden at runtime)
-ENV APP_ENV=dev_cloud
+ENV APP_ENV=dev-cloud
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 

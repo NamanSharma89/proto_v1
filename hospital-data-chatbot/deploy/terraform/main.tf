@@ -117,7 +117,7 @@ module "sagemaker" {
   security_group_id       = module.networking.app_security_group_id
   
   instance_type           = var.notebook_instance_type
-  deploy_notebook         = var.environment == "dev_cloud"
+  deploy_notebook         = var.environment == "dev-cloud"
   training_instance_type  = var.training_instance_type
   inference_instance_type = var.inference_instance_type
   

@@ -73,7 +73,7 @@ resource "aws_iam_role_policy_attachment" "sagemaker_policy_attachment" {
 
 # Create SageMaker Notebook Instance for development
 resource "aws_sagemaker_notebook_instance" "dev_notebook" {
-  count = var.environment == "dev_cloud" ? 1 : 0
+  count = var.environment == "dev-cloud" ? 1 : 0
 
   name                    = "${var.project_name}-${var.environment}-notebook"
   role_arn                = aws_iam_role.sagemaker_role.arn
@@ -89,7 +89,7 @@ resource "aws_sagemaker_notebook_instance" "dev_notebook" {
 }
 
 resource "aws_sagemaker_notebook_instance_lifecycle_configuration" "notebook_config" {
-  count = var.environment == "dev_cloud" ? 1 : 0
+  count = var.environment == "dev-cloud" ? 1 : 0
   
   name = "${var.project_name}-${var.environment}-notebook-config"
   
@@ -124,5 +124,5 @@ output "sagemaker_role_arn" {
 }
 
 output "notebook_url" {
-  value = var.environment == "dev_cloud" ? aws_sagemaker_notebook_instance.dev_notebook[0].url : null
+  value = var.environment == "dev-cloud" ? aws_sagemaker_notebook_instance.dev_notebook[0].url : null
 }

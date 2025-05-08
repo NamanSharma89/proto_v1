@@ -15,7 +15,7 @@ The CI/CD pipeline consists of the following stages:
 
 The pipeline supports three environments:
 
-- **Development (dev_cloud)**: Used for development and testing
+- **Development (dev-cloud)**: Used for development and testing
 - **Staging (stage)**: Used for pre-production testing
 - **Production (prod)**: Used for production deployment
 

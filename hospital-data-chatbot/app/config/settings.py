@@ -6,7 +6,7 @@ class AppConfig:
     """Application configuration settings."""
     
     # Environment selection
-    ENV = os.getenv('APP_ENV', 'dev_local')  # Options: dev_local, dev_cloud, stage, prod
+    ENV = os.getenv('APP_ENV', 'dev_local')  # Options: dev_local, dev-cloud, stage, prod
     
     # Basic settings without defaults that would override env-specific configs
     DEBUG = os.getenv('DEBUG') == 'True' if os.getenv('DEBUG') else None
@@ -29,7 +29,7 @@ class AppConfig:
             'LOG_LEVEL': 'DEBUG',
             'API_KEY_REQUIRED': False,
         },
-        'dev_cloud': {
+        'dev-cloud': {
             'DEBUG': True,
             'PORT': '8080',
             'DATA_DIR': 'data',
@@ -109,7 +109,7 @@ class AppConfig:
         """Get a human-readable name for the current environment."""
         env_names = {
             'dev_local': 'Development (Local)',
-            'dev_cloud': 'Development (Cloud)',
+            'dev-cloud': 'Development (Cloud)',
             'stage': 'Staging',
             'prod': 'Production'
         }
