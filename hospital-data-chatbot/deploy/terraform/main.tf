@@ -82,8 +82,8 @@ module "database" {
   
   instance_class    = var.db_instance_class
   allocated_storage = var.db_allocated_storage
-  db_name           = "hospital_data_${var.environment}"
-  username          = "${var.environment}_user"
+  db_name           = "hospital_data_${replace(var.environment, "-", "_")}"
+  username = "${replace(var.environment, "-", "_")}_user"
   password          = var.db_password
   
   # Pass common tags to the module - this will only work if tags variable is defined in database module
