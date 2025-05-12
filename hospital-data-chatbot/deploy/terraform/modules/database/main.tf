@@ -9,6 +9,11 @@ resource "aws_db_subnet_group" "main" {
   }
 }
 
+# Add this data source to fetch password from Parameter Store
+data "aws_ssm_parameter" "db_password" {
+  name = var.db_password_parameter_name
+}
+
 resource "aws_db_instance" "postgres" {
   identifier           = "${var.project_name}-${var.environment}"
   engine               = "postgres"
@@ -19,7 +24,7 @@ resource "aws_db_instance" "postgres" {
   
   db_name              = var.db_name
   username             = var.username
-  password             = var.password
+  password             = data.aws_ssm_parameter.db_password.value
   
   vpc_security_group_ids = [var.security_group_id]
   db_subnet_group_name   = aws_db_subnet_group.main.name
@@ -51,23 +56,50 @@ resource "aws_db_parameter_group" "postgres" {
   }
 }
 
-# Store DB credentials in Secrets Manager
-resource "aws_secretsmanager_secret" "db_credentials" {
-  name        = "${var.project_name}/${var.environment}/db-credentials"
-  description = "Database credentials for ${var.project_name} ${var.environment}"
+# Store the connection information in SSM Parameter Store (instead of Secrets Manager)
+resource "aws_ssm_parameter" "db_host" {
+  name        = "/${var.project_name}/${var.environment}/db-host"
+  description = "Database hostname for ${var.project_name} ${var.environment}"
+  type        = "String"
+  value       = aws_db_instance.postgres.address
   
   tags = {
-    Name = "${var.project_name}-${var.environment}-db-credentials"
+    Name = "${var.project_name}-${var.environment}-db-host"
   }
 }
 
-resource "aws_secretsmanager_secret_version" "db_credentials" {
-  secret_id = aws_secretsmanager_secret.db_credentials.id
-  secret_string = jsonencode({
-    username = var.username
-    password = var.password
-    host     = aws_db_instance.postgres.address
-    port     = aws_db_instance.postgres.port
-    dbname   = var.db_name
-  })
+resource "aws_ssm_parameter" "db_port" {
+  name        = "/${var.project_name}/${var.environment}/db-port"
+  description = "Database port for ${var.project_name} ${var.environment}"
+  type        = "String"
+  value       = aws_db_instance.postgres.port
+  
+  tags = {
+    Name = "${var.project_name}-${var.environment}-db-port"
+  }
 }
+
+resource "aws_ssm_parameter" "db_name" {
+  name        = "/${var.project_name}/${var.environment}/db-name"
+  description = "Database name for ${var.project_name} ${var.environment}"
+  type        = "String"
+  value       = var.db_name
+  
+  tags = {
+    Name = "${var.project_name}-${var.environment}-db-name"
+  }
+}
+
+resource "aws_ssm_parameter" "db_username" {
+  name        = "/${var.project_name}/${var.environment}/db-username"
+  description = "Database username for ${var.project_name} ${var.environment}"
+  type        = "String"
+  value       = var.username
+  
+  tags = {
+    Name = "${var.project_name}-${var.environment}-db-username"
+  }
+}
+
+# We don't need to create a password parameter here since it's already managed
+# by our script and accessed via the data source above

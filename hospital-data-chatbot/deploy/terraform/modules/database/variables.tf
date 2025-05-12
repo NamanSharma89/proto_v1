@@ -47,10 +47,10 @@ variable "username" {
   type        = string
 }
 
-variable "password" {
-  description = "Database password"
+# Replace the password variable with the parameter name variable
+variable "db_password_parameter_name" {
+  description = "Name of the SSM Parameter Store parameter that contains the database password"
   type        = string
-  sensitive   = true
 }
 
 variable "tags" {

@@ -45,11 +45,6 @@ variable "s3_bucket_name" {
   type        = string
 }
 
-variable "db_credentials_arn" {
-  description = "ARN of the Secrets Manager secret containing database credentials"
-  type        = string
-}
-
 variable "image_tag" {
   description = "Tag of the Docker image to deploy"
   type        = string
@@ -167,4 +162,31 @@ variable "tags" {
   description = "Additional tags to apply to resources"
   type        = map(string)
   default     = {}
+}
+
+# New variables to add in app_deployment/variables.tf
+
+variable "db_host_parameter_name" {
+  description = "Name of the SSM Parameter Store parameter containing the database host"
+  type        = string
+}
+
+variable "db_port_parameter_name" {
+  description = "Name of the SSM Parameter Store parameter containing the database port"
+  type        = string
+}
+
+variable "db_name_parameter_name" {
+  description = "Name of the SSM Parameter Store parameter containing the database name"
+  type        = string
+}
+
+variable "db_username_parameter_name" {
+  description = "Name of the SSM Parameter Store parameter containing the database username"
+  type        = string
+}
+
+variable "db_password_parameter_name" {
+  description = "Name of the SSM Parameter Store parameter containing the database password"
+  type        = string
 }

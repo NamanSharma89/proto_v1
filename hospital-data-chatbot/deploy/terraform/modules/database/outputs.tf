@@ -16,7 +16,27 @@ output "db_username" {
   sensitive   = true
 }
 
-output "db_credentials_arn" {
-  description = "The ARN of the Secrets Manager secret containing the database credentials"
-  value       = aws_secretsmanager_secret.db_credentials.arn
+output "db_host_parameter_name" {
+  description = "The name of the SSM Parameter Store parameter containing the database host"
+  value       = aws_ssm_parameter.db_host.name
+}
+
+output "db_port_parameter_name" {
+  description = "The name of the SSM Parameter Store parameter containing the database port"
+  value       = aws_ssm_parameter.db_port.name
+}
+
+output "db_name_parameter_name" {
+  description = "The name of the SSM Parameter Store parameter containing the database name"
+  value       = aws_ssm_parameter.db_name.name
+}
+
+output "db_username_parameter_name" {
+  description = "The name of the SSM Parameter Store parameter containing the database username"
+  value       = aws_ssm_parameter.db_username.name
+}
+
+output "db_password_parameter_name" {
+  description = "The name of the SSM Parameter Store parameter containing the database password"
+  value       = var.db_password_parameter_name
 }

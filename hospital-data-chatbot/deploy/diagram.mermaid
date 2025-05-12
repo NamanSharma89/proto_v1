@@ -1,0 +1,77 @@
+graph TD
+    subgraph "AWS Cloud"
+        subgraph "VPC"
+            subgraph "Public Subnets"
+                ALB["Application Load Balancer"]
+                IGW["Internet Gateway"]
+                NAT["NAT Gateway"]
+            end
+
+            subgraph "Private Subnets"
+                subgraph "ECS Fargate"
+                    APP["Container App Service"]
+                end
+
+                subgraph "Database"
+                    RDS["PostgreSQL RDS"]
+                end
+
+                subgraph "Machine Learning"
+                    SN["SageMaker Notebook\n(dev-cloud only)"]
+                    SM["SageMaker Models"]
+                end
+            end
+        end
+
+        subgraph "Storage"
+            S3["S3 Bucket\n(Application Data)"]
+            ECR["ECR Repository\n(Container Images)"]
+        end
+
+        subgraph "Parameter Store"
+            SSM["SSM Parameters\n/project/env/db-password"]
+        end
+
+        subgraph "AI Services"
+            BEDROCK["AWS Bedrock\n(Claude 3 Sonnet)"]
+        end
+
+        subgraph "Monitoring"
+            CW["CloudWatch\nLogs & Alarms"]
+            DASH["CloudWatch\nDashboard"]
+            SNS["SNS Topics\n(Notifications)"]
+        end
+
+        subgraph "Terraform State"
+            S3_TF["S3 Bucket\n(Terraform State)"]
+            DDB["DynamoDB\n(State Locking)"]
+        end
+    end
+
+    USER["User"] -->|HTTPS| ALB
+    ALB -->|HTTP| APP
+    APP -->|Query| RDS
+    APP -->|Store/Retrieve Data| S3
+    APP -->|AI Inference| BEDROCK
+    APP -->|Read Parameters| SSM
+    APP -->|Training Data| SM
+    
+    SN -->|ML Development| S3
+    SN -->|Deploy Models| SM
+    
+    APP -->|Logs| CW
+    RDS -->|Metrics| CW
+    CW -->|Alerts| SNS
+    CW -->|Visualize| DASH
+    SNS -->|Email| ADMIN["Admin"]
+    
+    CI["CI/CD Pipeline"] -->|Push Images| ECR
+    ECR -->|Pull Images| APP
+    
+    TERRAFORM["Terraform"] -->|State Management| S3_TF
+    TERRAFORM -->|State Locking| DDB
+    
+    IGW -->|Internet Access| PUBLIC["Internet"]
+    PUBLIC -->|Incoming Traffic| IGW
+    NAT -->|Outbound Only| PUBLIC
+    PRIVATE["Private Resources"] -->|Outbound Traffic| NAT

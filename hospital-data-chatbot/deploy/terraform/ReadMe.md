@@ -82,7 +82,7 @@ Enter your AWS Access Key, Secret Key, default region, and output format when pr
 ```bash
 export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export AWS_DEFAULT_REGION="us-east-1"
+export AWS_DEFAULT_REGION="ap-south-1"
 ```
 
 #### Method 3: Configuration File for the Script
@@ -91,7 +91,7 @@ Create a `.awsconfig` file in your project root:
 # AWS credentials configuration
 AWS_ACCESS_KEY_ID=your-access-key-here
 AWS_SECRET_ACCESS_KEY=your-secret-key-here
-AWS_DEFAULT_REGION=us-east-1
+AWS_DEFAULT_REGION=ap-south-1
 ```
 
 Add to your `.gitignore`:
@@ -356,7 +356,7 @@ Set credentials for the current session:
 ```bash
 export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export AWS_DEFAULT_REGION="us-east-1"
+export AWS_DEFAULT_REGION="ap-south-1"
 
 # Then run the script normally
 ./terraform-infra-manager.sh -e dev-cloud apply
@@ -369,7 +369,7 @@ Create a `.awsconfig` file with your credentials:
 ```
 AWS_ACCESS_KEY_ID=your-access-key-here
 AWS_SECRET_ACCESS_KEY=your-secret-key-here
-AWS_DEFAULT_REGION=us-east-1
+AWS_DEFAULT_REGION=ap-south-1
 ```
 
 The script will automatically load this file if present.

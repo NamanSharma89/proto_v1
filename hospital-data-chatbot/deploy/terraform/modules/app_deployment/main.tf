@@ -1,5 +1,8 @@
 # deploy/terraform/modules/app_deployment/main.tf
 
+# Add this to get the account ID
+data "aws_caller_identity" "current" {}
+
 # Create an ECS Cluster
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-${var.environment}"
@@ -27,62 +30,65 @@ resource "aws_ecs_task_definition" "app" {
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
-  container_definitions = jsonencode([
-    {
-      name      = "${var.project_name}-${var.environment}-container"
-      image     = "${var.ecr_repository_url}:${var.image_tag}"
-      essential = true
-      
-      portMappings = [
-        {
-          containerPort = 8080
-          hostPort      = 8080
-          protocol      = "tcp"
-        }
-      ]
-      
-      environment = [
-        { name = "APP_ENV", value = var.environment },
-        { name = "PORT", value = "8080" },
-        { name = "BEDROCK_MODEL_ID", value = "anthropic.claude-3-sonnet-20240229-v1:0" },
-        { name = "USE_S3", value = "True" },
-        { name = "S3_BUCKET", value = var.s3_bucket_name },
-        { name = "AWS_REGION", value = var.aws_region }
-      ]
-      
-      secrets = [
-        {
-          name      = "DB_HOST"
-          valueFrom = "${var.db_credentials_arn}:host::"
-        },
-        {
-          name      = "DB_PORT"
-          valueFrom = "${var.db_credentials_arn}:port::"
-        },
-        {
-          name      = "DB_NAME"
-          valueFrom = "${var.db_credentials_arn}:dbname::"
-        },
-        {
-          name      = "DB_USER"
-          valueFrom = "${var.db_credentials_arn}:username::"
-        },
-        {
-          name      = "DB_PASSWORD"
-          valueFrom = "${var.db_credentials_arn}:password::"
-        }
-      ]
-      
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = "/ecs/${var.project_name}-${var.environment}"
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
+# Updated container definition in modules/app_deployment/main.tf
+# (Only showing the modified part)
+
+container_definitions = jsonencode([
+  {
+    name      = "${var.project_name}-${var.environment}-container"
+    image     = "${var.ecr_repository_url}:${var.image_tag}"
+    essential = true
+    
+    portMappings = [
+      {
+        containerPort = 8080
+        hostPort      = 8080
+        protocol      = "tcp"
+      }
+    ]
+    
+    environment = [
+      { name = "APP_ENV", value = var.environment },
+      { name = "PORT", value = "8080" },
+      { name = "BEDROCK_MODEL_ID", value = "anthropic.claude-3-sonnet-20240229-v1:0" },
+      { name = "USE_S3", value = "True" },
+      { name = "S3_BUCKET", value = var.s3_bucket_name },
+      { name = "AWS_REGION", value = var.aws_region }
+    ]
+    
+    secrets = [
+      {
+        name      = "DB_HOST"
+        valueFrom = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_host_parameter_name}"
+      },
+      {
+        name      = "DB_PORT"
+        valueFrom = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_port_parameter_name}"
+      },
+      {
+        name      = "DB_NAME"
+        valueFrom = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_name_parameter_name}"
+      },
+      {
+        name      = "DB_USER"
+        valueFrom = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_username_parameter_name}"
+      },
+      {
+        name      = "DB_PASSWORD"
+        valueFrom = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_password_parameter_name}"
+      }
+    ]
+    
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = "/ecs/${var.project_name}-${var.environment}"
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
       }
     }
-  ])
+  }
+])
 
   tags = merge(
     {
@@ -147,6 +153,8 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Update in modules/app_deployment/main.tf
+
 resource "aws_iam_policy" "app_policy" {
   name        = "${var.project_name}-${var.environment}-app-policy"
   description = "Policy for ${var.project_name} application"
@@ -174,12 +182,20 @@ resource "aws_iam_policy" "app_policy" {
         Effect   = "Allow"
         Resource = "*"
       },
+      # Replace Secrets Manager permissions with SSM Parameter Store permissions
       {
         Action = [
-          "secretsmanager:GetSecretValue"
+          "ssm:GetParameter",
+          "ssm:GetParameters"
         ]
         Effect   = "Allow"
-        Resource = [var.db_credentials_arn]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_host_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_port_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_name_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_username_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_password_parameter_name}"
+        ]
       }
     ]
   })
@@ -454,4 +470,36 @@ resource "aws_cloudwatch_metric_alarm" "service_high_memory" {
     ClusterName = aws_ecs_cluster.main.name
     ServiceName = local.app_service_name
   }
+}
+
+# Add this policy for the ECS execution role in modules/app_deployment/main.tf
+
+resource "aws_iam_policy" "ecs_execution_role_ssm_policy" {
+  name        = "${var.project_name}-${var.environment}-ecs-ssm-policy"
+  description = "Policy to allow ECS task execution role to access SSM parameters"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "ssm:GetParameters",
+          "ssm:GetParameter"
+        ]
+        Effect = "Allow"
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_host_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_port_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_name_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_username_parameter_name}",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.db_password_parameter_name}"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_ssm_policy_attachment" {
+  role       = aws_iam_role.ecs_execution.name
+  policy_arn = aws_iam_policy.ecs_execution_role_ssm_policy.arn
 }

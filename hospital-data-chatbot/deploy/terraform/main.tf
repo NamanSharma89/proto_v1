@@ -70,7 +70,20 @@ module "storage" {
   tags = local.common_tags
 }
 
-# Database module - RDS PostgreSQL
+# Update this section in deploy/terraform/main.tf
+
+# Create the SSM Parameter for the database password
+resource "aws_ssm_parameter" "db_password" {
+  name        = "/${var.project_name}/${var.environment}/db-password"
+  description = "Database password for ${var.project_name} ${var.environment}"
+  type        = "SecureString"
+  value       = var.db_password  # We still need to provide this as a variable input, but it's no longer stored in state
+  overwrite   = true
+  
+  tags = local.common_tags
+}
+
+# Update the database module to use parameter store
 module "database" {
   source = "./modules/database"
 
@@ -83,10 +96,11 @@ module "database" {
   instance_class    = var.db_instance_class
   allocated_storage = var.db_allocated_storage
   db_name           = "hospital_data_${replace(var.environment, "-", "_")}"
-  username = "${replace(var.environment, "-", "_")}_user"
-  password          = var.db_password
+  username          = "${replace(var.environment, "-", "_")}_user"
   
-  # Pass common tags to the module - this will only work if tags variable is defined in database module
+  # Pass the parameter name instead of the actual password
+  db_password_parameter_name = aws_ssm_parameter.db_password.name
+  
   tags = local.common_tags
 }
 
@@ -125,6 +139,8 @@ module "sagemaker" {
 }
 
 # App deployment module - ECS Fargate, ALB, auto-scaling
+# In deploy/terraform/main.tf
+
 module "app_deployment" {
   source = "./modules/app_deployment"
 
@@ -139,7 +155,13 @@ module "app_deployment" {
   
   ecr_repository_url    = module.storage.ecr_repository_url
   s3_bucket_name        = module.storage.app_bucket_name
-  db_credentials_arn    = module.database.db_credentials_arn
+  
+  # Replace db_credentials_arn with the SSM parameter names
+  db_host_parameter_name     = module.database.db_host_parameter_name
+  db_port_parameter_name     = module.database.db_port_parameter_name
+  db_name_parameter_name     = module.database.db_name_parameter_name
+  db_username_parameter_name = module.database.db_username_parameter_name
+  db_password_parameter_name = module.database.db_password_parameter_name
   
   image_tag             = var.image_tag
   acm_certificate_arn   = var.acm_certificate_arn

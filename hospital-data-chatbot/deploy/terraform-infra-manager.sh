@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # terraform-infra-manager.sh - A script to manage AWS infrastructure with Terraform
-# Modified to check for existing S3 bucket
+# Enhanced with SSM Parameter Store integration for secure handling of database passwords
 
 # Set script to exit on error
 set -e
@@ -22,7 +22,7 @@ AWS_PROFILE=${AWS_PROFILE:-$DEFAULT_AWS_PROFILE}
 function show_usage() {
     echo "Usage: $0 [OPTIONS] COMMAND"
     echo ""
-    echo "A utility script to manage Terraform infrastructure"
+    echo "A utility script to manage Terraform infrastructure with secure parameter handling"
     echo ""
     echo "Commands:"
     echo "  init        Initialize Terraform working directory"
@@ -34,6 +34,7 @@ function show_usage() {
     echo "  workspace   Switch between workspaces"
     echo "  fmt         Reformat your configuration in the standard style"
     echo "  all         Run init, validate, plan, and apply in sequence"
+    echo "  params      Manage SSM parameters (create/update database password)"
     echo ""
     echo "Options:"
     echo "  -d, --directory DIR   Terraform directory (default: ./terraform)"
@@ -48,6 +49,7 @@ function show_usage() {
     echo "  $0 -e prod apply                # Deploy to production"
     echo "  $0 -a destroy                   # Destroy infra without confirmation"
     echo "  $0 -e staging -a all            # Full deployment to staging"
+    echo "  $0 -e dev-cloud params          # Manage database password parameter"
     echo ""
 }
 
@@ -80,6 +82,95 @@ function check_s3_bucket_exists() {
     fi
 }
 
+# Function to check if SSM parameter exists (fixed version)
+function check_ssm_parameter_exists() {
+    local param_name="/$PROJECT_NAME/$BUCKET_ENV/db-password"
+    
+    if aws ssm get-parameter --name "$param_name" --region "$AWS_REGION" &>/dev/null; then
+        echo "DEBUG: Parameter $param_name exists"  # Add debugging
+        return 0  # Parameter exists
+    else
+        echo "DEBUG: Parameter $param_name does not exist"  # Add debugging
+        return 1  # Parameter doesn't exist
+    fi
+}
+
+# Function to create/update database password parameter
+function manage_db_password_parameter() {
+    local param_name="/$PROJECT_NAME/$BUCKET_ENV/db-password"
+    
+    echo "Managing SSM Parameter: $param_name"
+    
+    if check_ssm_parameter_exists; then
+        echo "Parameter already exists. Do you want to update it?"
+        select yn in "Yes" "No"; do
+            case $yn in
+                Yes ) break;;
+                No ) return 0;;
+            esac
+        done
+    fi
+    
+    echo "Enter a secure password for the database (will not be shown on screen):"
+    read -s DB_PASSWORD
+    echo ""
+    
+    # Confirm password
+    echo "Confirm the password:"
+    read -s DB_PASSWORD_CONFIRM
+    echo ""
+    
+    if [[ "$DB_PASSWORD" != "$DB_PASSWORD_CONFIRM" ]]; then
+        echo "❌ Passwords do not match. Please try again."
+        return 1
+    fi
+    
+    # Create/update the parameter (using default AWS encryption)
+    if aws ssm put-parameter --name "$param_name" \
+        --description "Database password for $PROJECT_NAME $BUCKET_ENV" \
+        --type "SecureString" \
+        --value "$DB_PASSWORD" \
+        --overwrite \
+        --region "$AWS_REGION"; then
+        
+        echo "✅ Parameter $param_name created/updated successfully"
+    else
+        echo "❌ Failed to create/update parameter $param_name"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Function to ensure database password parameter exists before terraform operations
+function ensure_db_password_parameter() {
+    local param_name="/$PROJECT_NAME/$BUCKET_ENV/db-password"
+    
+    echo "Checking for database password parameter: $param_name"
+    
+    # Use the aws CLI directly to check for parameter existence
+    if aws ssm get-parameter --name "$param_name" --region "$AWS_REGION" &>/dev/null; then
+        echo "✅ Database password parameter found in SSM Parameter Store"
+        return 0
+    else
+        echo "⚠️ Database password parameter not found in SSM Parameter Store"
+        echo "You need to create this parameter before running Terraform operations"
+        
+        read -p "Do you want to create the parameter now? (y/n): " CREATE_PARAM
+        if [[ "$CREATE_PARAM" =~ ^[Yy]$ ]]; then
+            manage_db_password_parameter
+            if [ $? -ne 0 ]; then
+                echo "❌ Parameter creation failed. Cannot proceed."
+                exit 1
+            fi
+        else
+            echo "❌ Cannot proceed without database password parameter"
+            echo "You can create it later using: $0 -e $ENV params"
+            exit 1
+        fi
+    fi
+}
+
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -108,7 +199,7 @@ while [[ $# -gt 0 ]]; do
             show_usage
             exit 0
             ;;
-        init|plan|apply|destroy|output|validate|workspace|fmt|all)
+        init|plan|apply|destroy|output|validate|workspace|fmt|all|params)
             COMMAND="$1"
             shift
             ;;
@@ -128,7 +219,7 @@ if [ -z "$COMMAND" ]; then
 fi
 
 # Check if terraform directory exists
-if [ ! -d "$TF_DIR" ]; then
+if [ ! -d "$TF_DIR" ] && [ "$COMMAND" != "params" ]; then
     echo "Error: Terraform directory '$TF_DIR' does not exist."
     echo "Create it or specify a different directory with -d option."
     exit 1
@@ -150,6 +241,16 @@ BUCKET_ENV=$(echo ${ENV} | tr '_' '-' | tr '[:upper:]' '[:lower:]')
 PROJECT_NAME=$(basename $(pwd) | tr '_' '-' | tr '[:upper:]' '[:lower:]')
 if [ -z "$PROJECT_NAME" ] || [ "$PROJECT_NAME" == "." ]; then
     PROJECT_NAME="hospital-data-chatbot"
+fi
+
+# Handle the 'params' command separately
+if [ "$COMMAND" == "params" ]; then
+    echo "🔑 Managing SSM Parameters for $PROJECT_NAME in $ENV environment"
+    echo "======================================================"
+    manage_db_password_parameter
+    echo "======================================================"
+    echo "✨ Parameter management completed for environment: $ENV"
+    exit 0
 fi
 
 # Construct bucket name following the same pattern as bootstrap.sh
@@ -235,6 +336,11 @@ EOF
     echo "✅ Created/updated backend config: $BACKEND_DIR/${ENV}.hcl"
 fi
 
+# For commands that modify infrastructure, ensure the SSM parameter exists
+if [[ "$COMMAND" == "apply" || "$COMMAND" == "all" ]]; then
+    ensure_db_password_parameter
+fi
+
 # Change to terraform directory
 cd "$TF_DIR"
 
@@ -308,9 +414,22 @@ case "$COMMAND" in
         run_terraform "init" "$INIT_ARGS"
         ;;
     plan)
+        # For plan, we want to check if the DB parameter exists but not require it
+        if ! check_ssm_parameter_exists; then
+            echo "⚠️ Warning: Database password parameter not found in SSM Parameter Store"
+            echo "This may cause the plan to fail if your infrastructure uses it."
+            echo "Consider running '$0 -e $ENV params' to set up the parameter."
+            echo ""
+            read -p "Do you want to continue anyway? (y/n): " CONTINUE
+            if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+                echo "Operation aborted."
+                exit 0
+            fi
+        fi
         run_terraform "plan" "$TF_VAR_FILE"
         ;;
     apply)
+        ensure_db_password_parameter
         run_terraform "apply" "$TF_VAR_FILE $APPLY_ARGS"
         ;;
     destroy)
@@ -346,6 +465,10 @@ case "$COMMAND" in
         ;;
     all)
         echo "🔄 Running full deployment pipeline..."
+        
+        # Check for required SSM parameter before starting deployment
+        ensure_db_password_parameter
+        
         INIT_ARGS=""
         if [ -n "$BACKEND_CONFIG" ]; then
             INIT_ARGS="$BACKEND_CONFIG -reconfigure"
