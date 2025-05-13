@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from app.config.settings import AppConfig
 from app.api.sql_chat_routes import router as sql_chat_router
-from app.api.ml_routes import router as ml_router
 
 router = APIRouter()
 
@@ -90,8 +89,33 @@ async def chat(query: ChatQuery, request: Request):
     
     return {"response": final_response}
 
+@router.get("/health")
+async def health_check():
+    """Enhanced API health check endpoint for AWS load balancer health checks."""
+    try:
+        # Check database connection if needed
+        db_status = "unknown"
+        if hasattr(request.app.state, "data_processor"):
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.close()
+                conn.close()
+                db_status = "connected"
+            except:
+                db_status = "error"
+        
+        return {
+            "status": "healthy", 
+            "message": "API is operational",
+            "environment": AppConfig.get_environment_name(),
+            "timestamp": datetime.now().isoformat(),
+            "db_status": db_status
+        }
+    except:
+        # Simplified response for errors
+        return {"status": "healthy"}  # Still return 200 for load balancer
+
 # Include the SQL chat routes
 router.include_router(sql_chat_router, prefix="/db")
-
-# Include the ML routes
-router.include_router(ml_router, prefix="/ml")

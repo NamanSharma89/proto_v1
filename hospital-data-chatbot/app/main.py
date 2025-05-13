@@ -5,6 +5,7 @@ from app.core.sql_query_engine import SQLQueryEngine
 from app.utils.logging import setup_logging
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import AppConfig
+import os
 
 def create_app():
     """Create and configure the FastAPI application."""
@@ -50,6 +51,19 @@ def create_app():
     else:
         # Production & staging settings
         logger.info("Production/Staging configuration applied")
+
+    # In the create_app function in app/main.py
+    # Update data processor initialization
+
+    # Initialize data processor and load data
+    if os.path.exists(os.path.join(AppConfig.DATA_DIR, 'raw', 'hospital_data.xlsx')):
+        data_processor = DataProcessor(auto_ingest_db=not AppConfig.is_production())
+    else:
+        logger.warning("Hospital data file not found, skipping auto-loading")
+        # Initialize without auto-loading
+        data_processor = DataProcessor(auto_load=False, auto_ingest_db=False)
+
+    app.state.data_processor = data_processor
     
     logger.info("FastAPI application configured and ready")
     return app

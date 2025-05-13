@@ -123,6 +123,14 @@ jobs:
         working-directory: deploy/terraform
         run: terraform validate
       
+      - name: Create Parameter Store for DB Password
+        run: |
+          aws ssm put-parameter \
+            --name "/${env.PROJECT_NAME}/${{ env.ENV }}/db-password" \
+            --type "SecureString" \
+            --value "${{ secrets.DB_PASSWORD }}" \
+            --overwrite
+      
       - name: Terraform Plan
         working-directory: deploy/terraform
         run: |
@@ -174,29 +182,27 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
       
-      - name: Extract repository name
-        run: |
-          REPO_URL="${{ needs.terraform.outputs.ecr_repository_url }}"
-          REPO_NAME=$(echo $REPO_URL | cut -d'/' -f2)
-          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
-      
       - name: Build and tag Docker image
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          # Add sample data file for container to work with
+          mkdir -p data/raw
+          touch data/raw/hospital_data.xlsx
+          
           # Build the Docker image
-          docker build -t $ECR_REGISTRY/${{ env.REPO_NAME }}:$IMAGE_TAG \
+          docker build -t $ECR_REGISTRY/${{ env.PROJECT_NAME }}-${{ env.ENV }}:$IMAGE_TAG \
             --build-arg APP_ENV=${{ env.ENV }} \
             --build-arg BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0 \
             .
           
           # Tag with environment and latest
-          docker tag $ECR_REGISTRY/${{ env.REPO_NAME }}:$IMAGE_TAG $ECR_REGISTRY/${{ env.REPO_NAME }}:${{ env.ENV }}-latest
+          docker tag $ECR_REGISTRY/${{ env.PROJECT_NAME }}-${{ env.ENV }}:$IMAGE_TAG $ECR_REGISTRY/${{ env.PROJECT_NAME }}-${{ env.ENV }}:latest
           
-          echo "image=$ECR_REGISTRY/${{ env.REPO_NAME }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "image_latest=$ECR_REGISTRY/${{ env.REPO_NAME }}:${{ env.ENV }}-latest" >> $GITHUB_OUTPUT
+          echo "image=$ECR_REGISTRY/${{ env.PROJECT_NAME }}-${{ env.ENV }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image_latest=$ECR_REGISTRY/${{ env.PROJECT_NAME }}-${{ env.ENV }}:latest" >> $GITHUB_OUTPUT
       
       - name: Push Docker image
         env:
@@ -230,6 +236,11 @@ jobs:
             echo "ENV=dev-cloud" >> $GITHUB_ENV
           fi
       
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
       - name: Terraform Init
         working-directory: deploy/terraform
         run: |
@@ -250,6 +261,7 @@ jobs:
             -target=module.app_deployment
       
       - name: Verify Deployment
+        working-directory: deploy/terraform
         run: |
           # Wait for app to be available
           APP_URL=$(terraform output -raw app_url)

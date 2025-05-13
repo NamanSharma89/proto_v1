@@ -1,6 +1,8 @@
 # app/config/settings.py
 import os
 from typing import Dict, Any
+# Add to app/config/settings.py
+import boto3
 
 class AppConfig:
     """Application configuration settings."""
@@ -12,7 +14,26 @@ class AppConfig:
     DEBUG = os.getenv('DEBUG') == 'True' if os.getenv('DEBUG') else None
     PORT = os.getenv('PORT')
     DATA_DIR = os.getenv('DATA_DIR')
-    
+
+    @classmethod
+    def get_ssm_parameter(cls, parameter_name, default=None):
+        """Fetch a parameter from AWS Systems Manager Parameter Store."""
+        try:
+            if cls.is_development() and not cls.USE_S3:
+                # In local development without AWS, return default
+                return default
+                
+            ssm = boto3.client('ssm', region_name=cls.AWS_REGION)
+            response = ssm.get_parameter(
+                Name=parameter_name,
+                WithDecryption=True
+            )
+            return response['Parameter']['Value']
+        except Exception as e:
+            print(f"Error retrieving parameter {parameter_name}: {str(e)}")
+            return default
+
+
     # Environment-specific configurations
     _env_configs: Dict[str, Dict[str, Any]] = {
         'dev_local': {
@@ -27,7 +48,7 @@ class AppConfig:
             'USE_S3': False,
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'DEBUG',
-            'API_KEY_REQUIRED': False,
+            'API_KEY_REQUIRED': False
         },
         'dev-cloud': {
             'DEBUG': True,
@@ -43,6 +64,7 @@ class AppConfig:
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'DEBUG',
             'API_KEY_REQUIRED': True,
+            'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/dev-cloud/db-password", "dev_password"),            
         },
         'stage': {
             'DEBUG': False,
@@ -58,6 +80,8 @@ class AppConfig:
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'INFO',
             'API_KEY_REQUIRED': True,
+            'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/stage/db-password", "stage_password"),
+
         },
         'prod': {
             'DEBUG': False,
@@ -73,6 +97,7 @@ class AppConfig:
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'WARNING',
             'API_KEY_REQUIRED': True,
+            'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/prod/db-password", "change_this_in_prod"),
         }
     }
     
@@ -103,7 +128,9 @@ class AppConfig:
     
     # Security settings - ensure API_KEY is always from env var if provided
     API_KEY = os.getenv('API_KEY', 'default_dev_key')  # Change in production!
-    
+
+
+
     @classmethod
     def get_environment_name(cls) -> str:
         """Get a human-readable name for the current environment."""
