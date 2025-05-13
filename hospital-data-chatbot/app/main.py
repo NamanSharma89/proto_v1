@@ -58,6 +58,4 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True) engine
-    app.state.sql_query_engine = SQLQueryEngine()
-    logger.info("SQL Query Engine initialized")
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True)

@@ -1,5 +1,4 @@
 # app/ml/feature_store.py
-import pandas as pd
 import polars as pl
 from typing import Dict, List, Any, Optional
 import json

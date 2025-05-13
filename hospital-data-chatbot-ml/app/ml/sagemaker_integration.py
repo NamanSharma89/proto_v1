@@ -3,11 +3,11 @@ import boto3
 import json
 import os
 import numpy as np
-import pandas as pd
 import polars as pl
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 import time
+import io
 from app.config.settings import AppConfig
 from app.utils.logging import get_logger
 from app.ml.feature_store import FeatureStore
@@ -53,17 +53,15 @@ class SageMakerIntegration:
         # Upload data to S3
         s3 = boto3.resource('s3')
         
-        # Convert Polars to pandas for S3 upload
-        train_pandas = train_df.to_pandas()
-        test_pandas = test_df.to_pandas()
-        
         # Save train set
-        train_csv_buffer = train_pandas.to_csv(index=False).encode('utf-8')
-        s3.Object(s3_bucket, training_data_key).put(Body=train_csv_buffer)
+        train_csv_buffer = io.StringIO()
+        train_df.write_csv(train_csv_buffer)
+        s3.Object(s3_bucket, training_data_key).put(Body=train_csv_buffer.getvalue().encode('utf-8'))
         
         # Save test set
-        test_csv_buffer = test_pandas.to_csv(index=False).encode('utf-8')
-        s3.Object(s3_bucket, test_data_key).put(Body=test_csv_buffer)
+        test_csv_buffer = io.StringIO()
+        test_df.write_csv(test_csv_buffer)
+        s3.Object(s3_bucket, test_data_key).put(Body=test_csv_buffer.getvalue().encode('utf-8'))
         
         # Set up SageMaker training job
         training_job_name = f"{model_name}-{int(time.time())}"
@@ -81,18 +79,21 @@ class SageMakerIntegration:
         
         # Set hyperparameters
         if not hyperparameters:
+            unique_target_values = pl.Series(train_df[target_column]).unique()
+            num_unique_targets = len(unique_target_values)
+            
             if algorithm_name == 'xgboost':
                 hyperparameters = {
-                    'objective': 'binary:logistic' if len(train_df[target_column].unique()) <= 2 else 'multi:softmax',
+                    'objective': 'binary:logistic' if num_unique_targets <= 2 else 'multi:softmax',
                     'num_round': '100',
                     'max_depth': '6',
                     'eta': '0.3',
-                    'eval_metric': 'auc' if len(train_df[target_column].unique()) <= 2 else 'merror'
+                    'eval_metric': 'auc' if num_unique_targets <= 2 else 'merror'
                 }
             else:
                 hyperparameters = {
-                    'predictor_type': 'binary_classifier' if len(train_df[target_column].unique()) <= 2 else 'multiclass_classifier',
-                    'num_classes': str(len(train_df[target_column].unique())),
+                    'predictor_type': 'binary_classifier' if num_unique_targets <= 2 else 'multiclass_classifier',
+                    'num_classes': str(num_unique_targets),
                     'mini_batch_size': '100'
                 }
         
@@ -233,8 +234,12 @@ class SageMakerIntegration:
             Dictionary with prediction results
         """
         # Convert features to CSV
-        feature_df = pd.DataFrame([features])
-        csv_data = feature_df.to_csv(index=False, header=False)
+        feature_df = pl.DataFrame([features])
+        
+        # Convert to CSV without headers
+        csv_buffer = io.StringIO()
+        feature_df.write_csv(csv_buffer, include_header=False)
+        csv_data = csv_buffer.getvalue()
         
         # Get prediction from endpoint
         response = self.sagemaker_runtime.invoke_endpoint(
@@ -256,7 +261,9 @@ class SageMakerIntegration:
     def _split_train_test(self, df: pl.DataFrame, test_size: float = 0.2) -> Tuple[pl.DataFrame, pl.DataFrame]:
         """Split a DataFrame into training and test sets."""
         # Create a random column for splitting
-        df = df.with_column(pl.lit(np.random.random(df.height)).alias('_split_col'))
+        n_rows = df.height
+        random_values = np.random.random(n_rows)
+        df = df.with_column(pl.Series("_split_col", random_values))
         
         # Split based on random value
         train_df = df.filter(pl.col('_split_col') >= test_size)

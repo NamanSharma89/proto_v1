@@ -3,8 +3,8 @@ import re
 from typing import Dict, List, Any, Tuple, Optional
 import psycopg2
 import psycopg2.extras
-import pandas as pd
 import polars as pl
+from io import StringIO
 
 from app.core.llm_connector import BedrockLLM
 from app.utils.db import get_db_connection
@@ -409,11 +409,14 @@ class SQLQueryEngine:
         result_table = "Results:\n"
         
         # Convert to DataFrame for easier formatting
-        df = pd.DataFrame(result_sample)
-        
-        if not df.empty:
-            # Format as a readable table
-            result_table += df.to_string(index=False)
+        # Create a Polars DataFrame from the result sample
+        if result_sample:
+            df = pl.DataFrame(result_sample)
+            if not df.is_empty():
+                # Format as a readable table using Polars
+                result_table += df.to_string(index=False)
+            else:
+                result_table = "No results returned."
         else:
             result_table = "No results returned."
         
@@ -451,20 +454,57 @@ class SQLQueryEngine:
                 if truncated:
                     basic_response += f" Showing first {max_rows}."
                     
-                # Format a simple table
-                basic_response += "\n\n"
-                for col in column_names:
-                    basic_response += f"{col}\t"
-                basic_response += "\n"
-                
-                for row in result_sample:
-                    for col in column_names:
-                        basic_response += f"{row.get(col, 'N/A')}\t"
-                    basic_response += "\n"
+                # Format a simple table using Polars if available
+                try:
+                    if result_sample:
+                        df = pl.DataFrame(result_sample)
+                        if not df.is_empty():
+                            basic_response += "\n\n" + df.to_string(index=False)
+                        else:
+                            # Manual formatting as fallback
+                            basic_response += self._format_results_manually(result_sample, column_names)
+                    else:
+                        basic_response += "\n\nNo results to display."
+                except Exception:
+                    # Ultimate fallback: manual formatting
+                    basic_response += self._format_results_manually(result_sample, column_names)
             else:
                 basic_response += "No results found for your query."
                 
             return basic_response
+    
+    def _format_results_manually(self, result_sample: List[Dict[str, Any]], column_names: List[str]) -> str:
+        """
+        Manually format results as a simple table when other methods fail.
+        
+        Args:
+            result_sample: List of result dictionaries
+            column_names: Names of the columns
+            
+        Returns:
+            Formatted table as string
+        """
+        output = "\n\n"
+        
+        # Add header row
+        for col in column_names:
+            output += f"{col}\t"
+        output += "\n"
+        
+        # Add separator
+        output += "-" * (sum(len(col) + 8 for col in column_names)) + "\n"
+        
+        # Add data rows
+        for row in result_sample:
+            for col in column_names:
+                value = row.get(col, "N/A")
+                # Truncate long values
+                if isinstance(value, str) and len(value) > 30:
+                    value = value[:27] + "..."
+                output += f"{value}\t"
+            output += "\n"
+        
+        return output
     
     def _fix_sql_query(self, sql_query: str, error_message: str, user_query: str) -> Tuple[str, str]:
         """

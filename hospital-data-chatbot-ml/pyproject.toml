@@ -1,0 +1,71 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hospital-data-chatbot"
+version = "0.1.0"
+description = "AI-powered hospital data chatbot using AWS Bedrock and SageMaker"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = [
+    "polars>=0.18.0",          # Fast DataFrame library
+    "numpy>=1.24.0",           # Numerical computing
+    "fastapi>=0.100.0",        # API framework
+    "uvicorn>=0.22.0",         # ASGI server
+    "boto3>=1.28.0",           # AWS SDK
+    "openpyxl>=3.1.2",         # Excel file handling
+    "fastexcel>=0.7.0",        # Faster Excel support
+    "psycopg2-binary>=2.9.5",  # PostgreSQL adapter
+    "python-dotenv>=1.0.0",    # Environment variable management
+    "pydantic>=2.0.0",         # Data validation
+    "rich>=13.0.0",            # Better console output
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.0.0",
+    "flake8>=6.0.0",
+    "pytest-cov>=4.0.0",       # Coverage reporting
+    "mypy>=1.0.0",             # Type checking
+]
+
+# Production dependencies
+prod = [
+    "gunicorn>=21.0.0",        # WSGI HTTP Server
+]
+
+# Database-specific dependencies
+database = [
+    "alembic>=1.10.0",         # Database migrations
+    "sqlalchemy>=2.0.0",       # SQL toolkit and ORM
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = "3.9"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"

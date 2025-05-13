@@ -1,8 +1,7 @@
 # app/ml/feature_engineering.py
-import pandas as pd
+import polars as pl
 import numpy as np
 from typing import List, Dict, Any
-import polars as pl
 from datetime import datetime, timedelta
 from app.utils.db import get_db_connection
 from app.utils.logging import get_logger
