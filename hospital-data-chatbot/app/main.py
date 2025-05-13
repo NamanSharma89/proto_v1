@@ -19,9 +19,18 @@ def create_app():
     logger = setup_logging(log_to_file=True)
     logger.info(f"Starting application in {AppConfig.get_environment_name()} environment")
     
-    # Initialize data processor and load data
-    data_processor = DataProcessor(auto_ingest_db=not AppConfig.is_production())
-    app.state.data_processor = data_processor
+    # Check if data file exists before attempting to load
+    data_file_path = os.path.join(AppConfig.DATA_DIR, 'raw', 'hospital_data.xlsx')
+    if os.path.exists(data_file_path):
+        # Initialize data processor and load data
+        data_processor = DataProcessor(auto_ingest_db=not AppConfig.is_production())
+        app.state.data_processor = data_processor
+        logger.info("Data processor initialized and data loaded")
+    else:
+        # Initialize data processor without loading data
+        logger.warning(f"Data file not found at {data_file_path}, initializing without data")
+        data_processor = DataProcessor(auto_load=False, auto_ingest_db=False)
+        app.state.data_processor = data_processor
     
     # Initialize SQL query engine
     sql_query_engine = SQLQueryEngine()
@@ -51,19 +60,6 @@ def create_app():
     else:
         # Production & staging settings
         logger.info("Production/Staging configuration applied")
-
-    # In the create_app function in app/main.py
-    # Update data processor initialization
-
-    # Initialize data processor and load data
-    if os.path.exists(os.path.join(AppConfig.DATA_DIR, 'raw', 'hospital_data.xlsx')):
-        data_processor = DataProcessor(auto_ingest_db=not AppConfig.is_production())
-    else:
-        logger.warning("Hospital data file not found, skipping auto-loading")
-        # Initialize without auto-loading
-        data_processor = DataProcessor(auto_load=False, auto_ingest_db=False)
-
-    app.state.data_processor = data_processor
     
     logger.info("FastAPI application configured and ready")
     return app

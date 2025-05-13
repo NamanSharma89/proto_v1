@@ -1,5 +1,5 @@
-# Dockerfile - Update with entrypoint script
-FROM python:3.13-slim
+# Dockerfile
+FROM python:3.9-slim
 
 WORKDIR /app
 
@@ -7,11 +7,10 @@ WORKDIR /app
 RUN pip install uv
 
 # Set default environment (will be overridden at runtime)
-ENV APP_ENV=dev-cloud
+ENV APP_ENV=dev
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 ENV DATA_DIR=data
-ENV WAIT_FOR_DB=true
 
 # Copy project files
 COPY . .
