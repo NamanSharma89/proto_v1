@@ -1,30 +1,48 @@
-# app/ml/hospital_ml_models.py
-from typing import Dict, List, Any, Optional
-import polars as pl
-import numpy as np
-import json
-import os
-from datetime import datetime
-from app.config.settings import AppConfig
-from app.utils.logging import get_logger
+# Enhanced version of HospitalMLModels implementation for training and hosting
+
 from app.ml.feature_store import FeatureStore
 from app.ml.sagemaker_integration import SageMakerIntegration
+import polars as pl
+import boto3
+import json
+import os
 
 class HospitalMLModels:
-    """
-    Manages machine learning models for hospital data analysis.
-    """
+    """Enhanced ML models for hospital data analysis."""
     
     def __init__(self):
-        self.logger = get_logger(__name__)
         self.feature_store = FeatureStore()
         self.sagemaker = SageMakerIntegration()
-        self.models_dir = os.path.join(AppConfig.DATA_DIR, 'models')
-        os.makedirs(self.models_dir, exist_ok=True)
         
-        # Load model registry
-        self.registry_path = os.path.join(self.models_dir, 'model_registry.json')
-        self.model_registry = self._load_model_registry()
+    def train_readmission_model(self):
+        """Train the readmission prediction model."""
+        # Get training data
+        features_df = self.feature_store.get_feature_set('readmission_prediction')
+        
+        # Define hyperparameters
+        hyperparameters = {
+            'objective': 'binary:logistic',
+            'num_round': '100',
+            'max_depth': '6',
+            'eta': '0.3',
+            'eval_metric': 'auc'
+        }
+        
+        # Train model using SageMaker
+        training_job = self.sagemaker.train_model(
+            model_name="readmission-prediction",
+            feature_set_name="readmission_prediction",
+            target_column="readmitted_30_days",
+            hyperparameters=hyperparameters
+        )
+        
+        return training_job
+    
+    def deploy_readmission_model(self, training_job_name):
+        """Deploy the readmission prediction model."""
+        endpoint_info = self.sagemaker.deploy_model(training_job_name)
+        return endpoint_info
+        
     
     def get_readmission_risk(self, patient_id: str) -> Dict[str, Any]:
         """

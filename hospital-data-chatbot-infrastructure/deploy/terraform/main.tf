@@ -193,3 +193,45 @@ module "app_deployment" {
   
   tags = local.common_tags
 }
+
+# deploy/terraform/main.tf (add ML API module)
+
+module "ml_api" {
+  source = "./modules/ml_api"
+
+  project_name          = var.project_name
+  environment           = var.environment
+  aws_region            = var.aws_region
+  
+  vpc_id                = module.networking.vpc_id
+  public_subnet_ids     = module.networking.public_subnet_ids
+  private_subnet_ids    = module.networking.private_subnet_ids
+  app_security_group_id = module.networking.app_security_group_id
+  
+  # Use a separate ECR repository for ML API
+  ecr_repository_url    = "${module.storage.ecr_repository_url}-ml-api"
+  s3_bucket_name        = module.storage.app_bucket_name
+  
+  # Database parameters for feature store access
+  db_host_parameter_name     = module.database.db_host_parameter_name
+  db_port_parameter_name     = module.database.db_port_parameter_name
+  db_name_parameter_name     = module.database.db_name_parameter_name
+  db_username_parameter_name = module.database.db_username_parameter_name
+  db_password_parameter_name = module.database.db_password_parameter_name
+  
+  # ML API specific configuration
+  image_tag             = var.ml_api_image_tag
+  task_cpu              = var.ml_api_task_cpu
+  task_memory           = var.ml_api_task_memory
+  desired_count         = var.ml_api_desired_count
+  min_capacity          = var.ml_api_min_capacity
+  max_capacity          = var.ml_api_max_capacity
+  
+  # Add SageMaker endpoint access
+  sagemaker_role_arn    = module.sagemaker[0].sagemaker_role_arn
+  
+  sns_topic_arn         = module.monitoring.sns_topic_arn
+  logs_retention_days   = var.logs_retention_days
+  
+  tags = local.common_tags
+}

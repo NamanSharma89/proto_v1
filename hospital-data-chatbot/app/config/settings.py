@@ -15,6 +15,13 @@ class AppConfig:
     PORT = os.getenv('PORT')
     DATA_DIR = os.getenv('DATA_DIR')
 
+    # app/config/settings.py (additions)
+
+    # Ollama settings
+    USE_OLLAMA = os.getenv('USE_OLLAMA', 'True').lower() == 'true'
+    OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5-coder:14b')
+    OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434')    
+
     @classmethod
     def get_ssm_parameter(cls, parameter_name, default=None):
         """Fetch a parameter from AWS Systems Manager Parameter Store."""
@@ -49,6 +56,7 @@ class AppConfig:
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'DEBUG',
             'API_KEY_REQUIRED': False
+            
         },
         'dev-cloud': {
             'DEBUG': True,
@@ -63,8 +71,8 @@ class AppConfig:
             'S3_BUCKET': 'hospital-data-chatbot-dev',
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'DEBUG',
-            'API_KEY_REQUIRED': True,
-            'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/dev-cloud/db-password", "dev_password"),            
+            'API_KEY_REQUIRED': True
+            # 'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/dev-cloud/db-password", "dev_password"),            
         },
         'stage': {
             'DEBUG': False,
@@ -79,8 +87,8 @@ class AppConfig:
             'S3_BUCKET': 'hospital-data-chatbot-stage',
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'INFO',
-            'API_KEY_REQUIRED': True,
-            'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/stage/db-password", "stage_password"),
+            'API_KEY_REQUIRED': True
+            # 'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/stage/db-password", "stage_password"),
 
         },
         'prod': {
@@ -96,8 +104,8 @@ class AppConfig:
             'S3_BUCKET': 'hospital-data-chatbot-prod',
             'AWS_REGION': 'ap-south-1',
             'LOG_LEVEL': 'WARNING',
-            'API_KEY_REQUIRED': True,
-            'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/prod/db-password", "change_this_in_prod"),
+            'API_KEY_REQUIRED': True
+            # 'DB_PASSWORD': get_ssm_parameter(f"/{PROJECT_NAME}/prod/db-password", "change_this_in_prod"),
         }
     }
     
