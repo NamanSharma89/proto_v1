@@ -158,106 +158,52 @@ class FeatureEngineering:
         finally:
             conn.close()
     
-    def _extract_readmission_features(self) -> pl.DataFrame:
-        """Extract features for readmission prediction."""
-        self.logger.info("Extracting readmission prediction features")
-        
+    # Enhanced version for feature_engineering.py
+    def extract_readmission_features(self) -> pl.DataFrame:
+        """Extract more comprehensive features for readmission prediction."""
         conn = get_db_connection()
+        
         try:
-            # This is a more complex query that would require admission/discharge timestamps
-            # and a way to identify readmissions in your data
             query = """
-            WITH patient_admissions AS (
-                SELECT 
-                    registry_id,
-                    admission_date,
-                    discharge_date,
-                    LEAD(admission_date) OVER (
-                        PARTITION BY registry_id 
-                        ORDER BY admission_date
-                    ) AS next_admission_date
-                FROM 
-                    patient_details
-                WHERE 
-                    admission_date IS NOT NULL
-                    AND discharge_date IS NOT NULL
-            ),
-            readmissions AS (
-                SELECT 
-                    registry_id,
-                    admission_date,
-                    discharge_date,
-                    next_admission_date,
-                    CASE 
-                        WHEN next_admission_date IS NOT NULL 
-                        AND (next_admission_date - discharge_date) <= INTERVAL '30 days'
-                        THEN 1
-                        ELSE 0
-                    END AS readmitted_30_days
-                FROM 
-                    patient_admissions
-            )
             SELECT 
                 p.registry_id,
                 p.age,
                 p.gender,
                 p.stay_duration,
-                COUNT(DISTINCT d.diagnosis) AS unique_diagnosis_count,
-                r.readmitted_30_days,
-                -- Additional features
-                EXTRACT(DOW FROM p.admission_date) AS admission_day_of_week,
-                EXTRACT(HOUR FROM p.admission_date) AS admission_hour,
+                COUNT(d.id) AS diagnosis_count,
+                -- Age-related features
+                CASE 
+                    WHEN p.age < 18 THEN 0
+                    WHEN p.age < 35 THEN 1
+                    WHEN p.age < 50 THEN 2
+                    WHEN p.age < 65 THEN 3
+                    WHEN p.age < 80 THEN 4
+                    ELSE 5
+                END AS age_group,
+                -- Common comorbidities
                 MAX(CASE WHEN d.diagnosis ILIKE '%diabetes%' THEN 1 ELSE 0 END) AS has_diabetes,
                 MAX(CASE WHEN d.diagnosis ILIKE '%hypertension%' THEN 1 ELSE 0 END) AS has_hypertension,
-                MAX(CASE WHEN d.diagnosis ILIKE '%heart%' THEN 1 ELSE 0 END) AS has_heart_condition
+                MAX(CASE WHEN d.diagnosis ILIKE '%heart%' THEN 1 ELSE 0 END) AS has_heart_condition,
+                MAX(CASE WHEN d.diagnosis ILIKE '%kidney%' THEN 1 ELSE 0 END) AS has_kidney_condition,
+                MAX(CASE WHEN d.diagnosis ILIKE '%liver%' THEN 1 ELSE 0 END) AS has_liver_condition,
+                -- Comorbidity score
+                (MAX(CASE WHEN d.diagnosis ILIKE '%diabetes%' THEN 1 ELSE 0 END) +
+                MAX(CASE WHEN d.diagnosis ILIKE '%hypertension%' THEN 1 ELSE 0 END) +
+                MAX(CASE WHEN d.diagnosis ILIKE '%heart%' THEN 1 ELSE 0 END) +
+                MAX(CASE WHEN d.diagnosis ILIKE '%kidney%' THEN 1 ELSE 0 END) +
+                MAX(CASE WHEN d.diagnosis ILIKE '%liver%' THEN 1 ELSE 0 END)) AS comorbidity_score,
+                -- Previous admissions info
+                COUNT(DISTINCT CASE WHEN p.admission_date IS NOT NULL THEN p.admission_date ELSE NULL END) AS admission_count
             FROM 
                 patient_details p
-            JOIN 
-                readmissions r ON p.registry_id = r.registry_id AND p.admission_date = r.admission_date
             LEFT JOIN 
                 diagnosis_details d ON p.registry_id = d.registry_id
             GROUP BY 
-                p.registry_id, p.age, p.gender, p.stay_duration, 
-                r.readmitted_30_days, p.admission_date
+                p.registry_id, p.age, p.gender, p.stay_duration
             """
             
-            # Note: This query assumes your schema has admission_date and discharge_date
-            # You'll need to adapt it to your actual schema
-            
-            try:
-                df = pl.read_database(query=query, connection=conn)
-            except Exception as e:
-                self.logger.error(f"Error executing readmission query: {str(e)}")
-                # Fall back to a simpler query if the complex one fails
-                simple_query = """
-                SELECT 
-                    p.registry_id,
-                    p.age,
-                    p.gender,
-                    p.stay_duration,
-                    COUNT(d.id) AS diagnosis_count
-                FROM 
-                    patient_details p
-                LEFT JOIN 
-                    diagnosis_details d ON p.registry_id = d.registry_id
-                GROUP BY 
-                    p.registry_id, p.age, p.gender, p.stay_duration
-                """
-                df = pl.read_database(query=simple_query, connection=conn)
-                # Add a dummy readmission column since we couldn't calculate it
-                df = df.with_column(pl.lit(None).alias("readmitted_30_days"))
-            
-            # Feature engineering
-            df = df.with_columns([
-                # Gender encoding
-                pl.when(pl.col("gender").is_in(["M", "m", "Male", "male"])).then(1)
-                  .when(pl.col("gender").is_in(["F", "f", "Female", "female"])).then(0)
-                  .otherwise(None)
-                  .alias("gender_encoded")
-            ])
-            
-            self.logger.info(f"Extracted {df.height} readmission feature records")
+            df = pl.read_database(query=query, connection=conn)
             return df
-            
+        
         finally:
             conn.close()

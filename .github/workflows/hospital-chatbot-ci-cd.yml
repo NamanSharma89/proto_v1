@@ -256,3 +256,4 @@ jobs:
               echo "1. Create a cluster: aws ecs create-cluster --cluster-name hospital-chatbot-${{ env.ENV }}"
               echo "2. Create a service: [Additional service creation steps]"
             fi
+  

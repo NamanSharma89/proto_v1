@@ -1,0 +1,67 @@
+# .github/workflows/model-training.yml
+name: ML Model Training and Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_type:
+        description: 'Type of model to train'
+        required: true
+        default: 'readmission_risk'
+        type: choice
+        options:
+          - readmission_risk
+          - patient_risk
+          - diagnosis_cluster
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev-cloud'
+        type: choice
+        options:
+          - dev-cloud
+          - stage
+          - prod
+
+env:
+  AWS_REGION: ap-south-1
+  PROJECT_NAME: hospital-data-chatbot
+
+jobs:
+  train-model:
+    name: Train and Deploy ML Model
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 sagemaker pandas scikit-learn
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Train and deploy model
+        id: train-deploy
+        run: |
+          python scripts/train_deploy_model.py \
+            --model-type ${{ github.event.inputs.model_type }} \
+            --environment ${{ github.event.inputs.environment }}
+      
+      - name: Report results
+        run: |
+          echo "Model training and deployment completed"
+          echo "Training job: ${{ steps.train-deploy.outputs.training_job }}"
+          echo "Endpoint: ${{ steps.train-deploy.outputs.endpoint }}"
+          echo "Model metrics: ${{ steps.train-deploy.outputs.metrics }}"
