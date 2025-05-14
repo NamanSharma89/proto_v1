@@ -19,16 +19,26 @@ class SQLQueryEngine:
     Flow:
     User query -> LLM generates SQL -> SQL executed on DB -> Results returned to LLM -> Response formatted
     """
-    
+
     def __init__(self):
         """Initialize the SQL Query Engine with LLM connector."""
         self.logger = get_logger(__name__)
-        self.llm = BedrockLLM()
+        
+        # Choose LLM implementation based on config
+        if AppConfig.USE_OLLAMA:
+            from app.core.ollama_connector import OllamaLLM
+            self.llm = OllamaLLM()
+            self.logger.info("Using Ollama for LLM processing")
+        else:
+            from app.core.llm_connector import BedrockLLM
+            self.llm = BedrockLLM()
+            self.logger.info("Using AWS Bedrock for LLM processing")
+        
         self.db_schema = None
         
         # Load DB schema on initialization
         self._load_db_schema()
-    
+        
     def process_query(self, user_query: str) -> Dict[str, Any]:
         """
         Process a natural language query by:
