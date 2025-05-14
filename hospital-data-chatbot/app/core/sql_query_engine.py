@@ -66,8 +66,8 @@ class SQLQueryEngine:
                     "sql_generated": False
                 }
             
-            # Step 2: Validate SQL for safety
-            is_safe, safety_message = self._validate_sql_safety(generated_sql)
+            # Step 2: Validate SQL for safety and fix common type issues
+            is_safe, safety_message, fixed_sql = self._validate_sql_safety(generated_sql)
             if not is_safe:
                 self.logger.warning(f"Unsafe SQL query generated: {generated_sql}")
                 return {
@@ -77,6 +77,12 @@ class SQLQueryEngine:
                     "sql": generated_sql,
                     "reasoning": reasoning
                 }
+            
+            # Use the fixed query if available
+            if fixed_sql != generated_sql:
+                self.logger.info(f"SQL query automatically fixed for type issues")
+                self.logger.debug(f"Original: {generated_sql}\nFixed: {fixed_sql}")
+                generated_sql = fixed_sql
             
             # Step 3: Execute SQL query
             result_data, column_names, error = self._execute_sql_query(generated_sql)
@@ -105,7 +111,7 @@ class SQLQueryEngine:
                         "reasoning": reasoning,
                         "error": error
                     }
-            
+
             # Step 4: Format the results using LLM
             if result_data:
                 formatted_response = self._format_sql_results(
@@ -246,11 +252,17 @@ class SQLQueryEngine:
                 for rel in self.db_schema["relationships"]:
                     schema_info += f"- {rel['table']}.{rel['column']} references {rel['foreign_table']}.{rel['foreign_column']}\n"
         
-        # Build the prompt
+        # Build the prompt with more guidance on data types
         prompt = f"""
         You are an expert SQL developer helping to translate natural language queries about hospital patient data into SQL queries.
         
         {schema_info}
+        
+        IMPORTANT DATA TYPE HANDLING:
+        - All columns are stored as TEXT in the database, even if they contain numeric values
+        - When comparing numeric values, always use CAST or :: to convert text to numbers
+        - For reliable conversion, use: CAST(NULLIF(column_name, '') AS NUMERIC)
+        - This approach handles NULL values and empty strings properly
         
         The most important tables are:
         1. patient_details - Contains patient records with columns like registry_id, age, gender
@@ -261,8 +273,9 @@ class SQLQueryEngine:
         Your task:
         1. Analyze the request and determine what SQL is needed
         2. Write a PostgreSQL query that answers the user's question
-        3. Explain your reasoning step by step
-        4. Ensure the query is secure and efficient
+        3. Ensure proper type conversion for any numeric comparisons
+        4. Explain your reasoning step by step
+        5. Ensure the query is secure and efficient
         
         Format your response as follows:
         
@@ -310,16 +323,20 @@ class SQLQueryEngine:
             self.logger.error(f"Error generating SQL: {str(e)}", exc_info=True)
             return "", f"Error generating SQL: {str(e)}"
     
-    def _validate_sql_safety(self, sql_query: str) -> Tuple[bool, str]:
+    def _validate_sql_safety(self, sql_query: str) -> Tuple[bool, str, str]:
         """
         Validate that the SQL query is safe to execute.
+        Attempt to fix common type conversion issues.
         
         Args:
             sql_query: The SQL query to validate
             
         Returns:
-            Tuple of (is_safe, message)
+            Tuple of (is_safe, message, fixed_query)
         """
+        # Keep the original query
+        fixed_query = sql_query
+        
         # Block dangerous operations
         dangerous_patterns = [
             (r'\bDROP\b', "DROP operations are not allowed"),
@@ -337,13 +354,38 @@ class SQLQueryEngine:
         # Check for dangerous patterns
         for pattern, message in dangerous_patterns:
             if re.search(pattern, sql_query, re.IGNORECASE):
-                return False, message
+                return False, message, fixed_query
         
         # Only allow SELECT statements
         if not re.match(r'^\s*SELECT', sql_query, re.IGNORECASE):
-            return False, "Only SELECT statements are allowed"
+            return False, "Only SELECT statements are allowed", fixed_query
         
-        return True, "SQL query is safe"
+        # Fix common type conversion issues
+        # Pattern for simple comparisons like: WHERE age > 65
+        numeric_comparison = re.compile(r'WHERE\s+(\w+)\s*([><=!]+)\s*(\d+(?:\.\d+)?)', re.IGNORECASE)
+        fixed_query = numeric_comparison.sub(
+            r'WHERE CAST(NULLIF(\1, \'\') AS NUMERIC) \2 \3', 
+            fixed_query
+        )
+        
+        # Pattern for numeric IN clauses: WHERE age IN (65, 70, 75)
+        in_comparison = re.compile(r'WHERE\s+(\w+)\s+IN\s*\(([\d\s,\.]+)\)', re.IGNORECASE)
+        fixed_query = in_comparison.sub(
+            r'WHERE CAST(NULLIF(\1, \'\') AS NUMERIC) IN (\2)', 
+            fixed_query
+        )
+        
+        # Pattern for BETWEEN clauses: WHERE age BETWEEN 65 AND 75
+        between_comparison = re.compile(
+            r'WHERE\s+(\w+)\s+BETWEEN\s+(\d+(?:\.\d+)?)\s+AND\s+(\d+(?:\.\d+)?)', 
+            re.IGNORECASE
+        )
+        fixed_query = between_comparison.sub(
+            r'WHERE CAST(NULLIF(\1, \'\') AS NUMERIC) BETWEEN \2 AND \3',
+            fixed_query
+        )
+        
+        return True, "SQL query is safe", fixed_query
     
     def _execute_sql_query(self, sql_query: str) -> Tuple[List[Dict[str, Any]], List[str], Optional[str]]:
         """
@@ -391,7 +433,7 @@ class SQLQueryEngine:
             return [], [], str(e)
     
     def _format_sql_results(self, user_query: str, sql_query: str, 
-                          result_data: List[Dict[str, Any]], column_names: List[str]) -> str:
+                        result_data: List[Dict[str, Any]], column_names: List[str]) -> str:
         """
         Use LLM to format SQL results into natural language response.
         
@@ -423,8 +465,11 @@ class SQLQueryEngine:
         if result_sample:
             df = pl.DataFrame(result_sample)
             if not df.is_empty():
-                # Format as a readable table using Polars
-                result_table += df.to_string(index=False)
+                # Format as a readable table using Polars - Fixed line below
+                # Polars uses str() or .write_csv() to a StringIO object, not to_string()
+                result_table += str(df)  # This is the correct way to convert Polars DataFrame to string
+                result_table += "\n\n"
+                result_table += f"Total rows returned: {len(result_data)}{truncation_message}"
             else:
                 result_table = "No results returned."
         else:
@@ -469,7 +514,8 @@ class SQLQueryEngine:
                     if result_sample:
                         df = pl.DataFrame(result_sample)
                         if not df.is_empty():
-                            basic_response += "\n\n" + df.to_string(index=False)
+                            # Fixed line below - use str() instead of to_string()
+                            basic_response += "\n\n" + str(df)
                         else:
                             # Manual formatting as fallback
                             basic_response += self._format_results_manually(result_sample, column_names)
@@ -528,7 +574,7 @@ class SQLQueryEngine:
         Returns:
             Tuple of (fixed_sql_query, reasoning)
         """
-        # Create prompt for fixing SQL
+        # Create prompt for fixing SQL with more guidance on type handling
         prompt = f"""
         You are an expert SQL developer fixing a PostgreSQL query that failed.
         
@@ -540,6 +586,13 @@ class SQLQueryEngine:
         ```
         
         Error Message: {error_message}
+        
+        Important notes for fixing this query:
+        1. The 'age' column is stored as TEXT in the database, not as a number
+        2. For numeric comparisons with text columns, use CAST or :: syntax
+        3. Some values may have decimal points, so cast to FLOAT or NUMERIC first, then to INTEGER if needed
+        4. For example, use: WHERE CAST(NULLIF(age, '') AS NUMERIC) > 65
+        5. The NULLIF function handles empty strings that can't be converted to numbers
         
         Please fix the SQL query to resolve the error. Only return the corrected SQL query and your reasoning.
         
@@ -572,5 +625,5 @@ class SQLQueryEngine:
             return fixed_sql, reasoning
             
         except Exception as e:
-            self.logger.error(f"Error fixing SQL: {str(e)}", exc_info=True)
+            self.logger.error(f"Error fixing SQL: {str(e)}")
             return "", f"Error fixing SQL: {str(e)}"
