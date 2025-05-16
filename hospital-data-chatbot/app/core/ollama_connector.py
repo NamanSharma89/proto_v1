@@ -86,7 +86,7 @@ class OllamaLLM:
     def _format_prompt(self, query, context):
         """Format the prompt for the text-to-SQL task."""
         return f"""
-        You are an expert SQL developer specialized in helping to translate natural language queries about hospital patient data into SQL queries.
+        You are an SQL developer specialized in helping to translate natural language queries about hospital patient data into SQL queries.
         
         {context}
         
