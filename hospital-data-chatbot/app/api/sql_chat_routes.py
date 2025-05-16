@@ -24,6 +24,17 @@ class SQLChatResponse(BaseModel):
     row_count: Optional[int] = None
     execution_time_ms: Optional[float] = None
     error: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "response": "There are 25 patients who are over 65 years old...\n\nSQL Query Used:\n```sql\nSELECT COUNT(*) FROM patient_details WHERE CAST(NULLIF(age, '') AS NUMERIC) > 65;\n```",
+                "success": True,
+                "sql": "SELECT COUNT(*) FROM patient_details WHERE CAST(NULLIF(age, '') AS NUMERIC) > 65;",
+                "row_count": 1,
+                "execution_time_ms": 256.34
+            }
+        }
 
 @router.post("/sql-chat", response_model=SQLChatResponse)
 async def sql_chat(query_data: SQLChatQuery, request: Request) -> Dict[str, Any]:
@@ -64,6 +75,7 @@ async def sql_chat(query_data: SQLChatQuery, request: Request) -> Dict[str, Any]
         }
         
         # Include SQL and reasoning if requested or in debug mode
+        # Always include SQL if requested - even if it's already in the response
         if query_data.include_sql or AppConfig.DEBUG:
             response["sql"] = result.get("sql", None)
         

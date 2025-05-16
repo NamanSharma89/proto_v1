@@ -11,6 +11,11 @@ from app.utils.db import get_db_connection
 from app.utils.logging import get_logger
 from app.config.settings import AppConfig
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class SQLQueryEngine:
     """
     Processes natural language queries by converting them to SQL using LLM,
@@ -45,7 +50,7 @@ class SQLQueryEngine:
         1. Converting it to SQL using LLM
         2. Validating the SQL for safety
         3. Executing the SQL against the database
-        4. Formatting the results with LLM
+        4. Formatting the results with LLM to include both SQL and results
         
         Args:
             user_query: Natural language query from the user
@@ -66,8 +71,8 @@ class SQLQueryEngine:
                     "sql_generated": False
                 }
             
-            # Step 2: Validate SQL for safety and fix common type issues
-            is_safe, safety_message, fixed_sql = self._validate_sql_safety(generated_sql)
+            # Step 2: Validate SQL for safety
+            is_safe, safety_message = self._validate_sql_safety(generated_sql)
             if not is_safe:
                 self.logger.warning(f"Unsafe SQL query generated: {generated_sql}")
                 return {
@@ -77,12 +82,6 @@ class SQLQueryEngine:
                     "sql": generated_sql,
                     "reasoning": reasoning
                 }
-            
-            # Use the fixed query if available
-            if fixed_sql != generated_sql:
-                self.logger.info(f"SQL query automatically fixed for type issues")
-                self.logger.debug(f"Original: {generated_sql}\nFixed: {fixed_sql}")
-                generated_sql = fixed_sql
             
             # Step 3: Execute SQL query
             result_data, column_names, error = self._execute_sql_query(generated_sql)
@@ -99,7 +98,6 @@ class SQLQueryEngine:
                     
                     if not error:
                         generated_sql = fixed_sql
-                        reasoning += f"\n\nFixed SQL reasoning: {fix_reasoning}"
                 
                 # If we still have an error after attempting to fix
                 if error:
@@ -108,17 +106,16 @@ class SQLQueryEngine:
                         "success": False,
                         "sql_generated": True,
                         "sql": generated_sql,
-                        "reasoning": reasoning,
                         "error": error
                     }
-
-            # Step 4: Format the results using LLM
+            
+            # Step 4: Format the results using LLM, including SQL in the response
             if result_data:
-                formatted_response = self._format_sql_results(
+                formatted_response = self._format_sql_results_with_query(
                     user_query, generated_sql, result_data, column_names
                 )
             else:
-                formatted_response = "The query executed successfully but didn't return any results."
+                formatted_response = f"The query executed successfully but didn't return any results.\n\nSQL Query Used:\n```sql\n{generated_sql}\n```"
             
             # Prepare success response
             return {
@@ -126,12 +123,11 @@ class SQLQueryEngine:
                 "success": True,
                 "sql_generated": True,
                 "sql": generated_sql,
-                "reasoning": reasoning,
                 "row_count": len(result_data) if result_data else 0,
                 "column_names": column_names,
                 "data": result_data
             }
-            
+                
         except Exception as e:
             self.logger.error(f"Error in SQL query engine: {str(e)}", exc_info=True)
             return {
@@ -290,40 +286,58 @@ class SQLQueryEngine:
     
     def _generate_sql_from_query(self, user_query: str) -> Tuple[str, str]:
         """
-        Use LLM to generate SQL from natural language query.
+        Use LLM to generate SQL from natural language query without extensive reasoning.
         
         Args:
             user_query: The natural language query from the user
             
         Returns:
-            Tuple of (generated_sql, reasoning)
+            Tuple of (generated_sql, empty_reasoning)
         """
-        prompt = self._generate_sql_prompt(user_query)
+        prompt = f"""
+        You are an expert SQL developer helping to translate natural language queries about hospital patient data into SQL queries.
+        
+        The database contains patient data with tables including:
+        1. patient_details - Contains patient records with columns like registry_id, age, gender
+        2. diagnosis_details - Contains diagnosis information related to patients, linked by registry_id
+        
+        IMPORTANT: When working with numeric columns (like age), use CAST(NULLIF(age, '') AS NUMERIC) for comparisons.
+        
+        User Query: {user_query}
+        
+        Please respond ONLY with the PostgreSQL query that would answer this question.
+        No explanations or reasoning - just give me the SQL query.
+        """
         
         try:
             # Get response from LLM
             response = self.llm.query(prompt, "")
             
-            # Extract SQL and reasoning from the response
-            sql_match = re.search(r'SQL:\s*(.*?)(?=$|\n\n)', response, re.DOTALL)
-            reasoning_match = re.search(r'REASONING:\s*(.*?)(?=$|\n\nSQL:)', response, re.DOTALL)
-            
-            generated_sql = sql_match.group(1).strip() if sql_match else ""
-            reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
-            
-            # Clean up SQL (remove markdown code block markers if present)
-            generated_sql = re.sub(r'^```sql\s*|\s*```$', '', generated_sql)
+            # Extract the SQL from the response
+            # Look for code blocks first
+            sql_match = re.search(r'```(?:sql)?\s*(.*?)\s*```', response, re.DOTALL)
+            if sql_match:
+                generated_sql = sql_match.group(1).strip()
+            else:
+                # Otherwise try to find a SELECT statement
+                select_match = re.search(r'(SELECT\s+.*?;)', response, re.DOTALL, re.IGNORECASE)
+                if select_match:
+                    generated_sql = select_match.group(1).strip()
+                else:
+                    # Use the whole response if none of the above patterns match
+                    generated_sql = response.strip()
             
             self.logger.info("SQL query generated successfully")
             self.logger.debug(f"Generated SQL: {generated_sql}")
             
-            return generated_sql, reasoning
+            # Return SQL with empty reasoning
+            return generated_sql, ""
             
         except Exception as e:
             self.logger.error(f"Error generating SQL: {str(e)}", exc_info=True)
             return "", f"Error generating SQL: {str(e)}"
     
-    def _validate_sql_safety(self, sql_query: str) -> Tuple[bool, str, str]:
+    def _validate_sql_safety(self, sql_query: str) -> Tuple[bool, str]:
         """
         Validate that the SQL query is safe to execute.
         Attempt to fix common type conversion issues.
@@ -332,7 +346,7 @@ class SQLQueryEngine:
             sql_query: The SQL query to validate
             
         Returns:
-            Tuple of (is_safe, message, fixed_query)
+            Tuple of (is_safe, message)
         """
         # Keep the original query
         fixed_query = sql_query
@@ -354,25 +368,25 @@ class SQLQueryEngine:
         # Check for dangerous patterns
         for pattern, message in dangerous_patterns:
             if re.search(pattern, sql_query, re.IGNORECASE):
-                return False, message, fixed_query
+                return False, message
         
         # Only allow SELECT statements
         if not re.match(r'^\s*SELECT', sql_query, re.IGNORECASE):
-            return False, "Only SELECT statements are allowed", fixed_query
+            return False, "Only SELECT statements are allowed"
         
-        # Fix common type conversion issues
+        # Fix common type conversion issues directly on the input query
         # Pattern for simple comparisons like: WHERE age > 65
         numeric_comparison = re.compile(r'WHERE\s+(\w+)\s*([><=!]+)\s*(\d+(?:\.\d+)?)', re.IGNORECASE)
-        fixed_query = numeric_comparison.sub(
+        sql_query = numeric_comparison.sub(
             r'WHERE CAST(NULLIF(\1, \'\') AS NUMERIC) \2 \3', 
-            fixed_query
+            sql_query
         )
         
         # Pattern for numeric IN clauses: WHERE age IN (65, 70, 75)
         in_comparison = re.compile(r'WHERE\s+(\w+)\s+IN\s*\(([\d\s,\.]+)\)', re.IGNORECASE)
-        fixed_query = in_comparison.sub(
+        sql_query = in_comparison.sub(
             r'WHERE CAST(NULLIF(\1, \'\') AS NUMERIC) IN (\2)', 
-            fixed_query
+            sql_query
         )
         
         # Pattern for BETWEEN clauses: WHERE age BETWEEN 65 AND 75
@@ -380,12 +394,17 @@ class SQLQueryEngine:
             r'WHERE\s+(\w+)\s+BETWEEN\s+(\d+(?:\.\d+)?)\s+AND\s+(\d+(?:\.\d+)?)', 
             re.IGNORECASE
         )
-        fixed_query = between_comparison.sub(
+        sql_query = between_comparison.sub(
             r'WHERE CAST(NULLIF(\1, \'\') AS NUMERIC) BETWEEN \2 AND \3',
-            fixed_query
+            sql_query
         )
         
-        return True, "SQL query is safe", fixed_query
+        # If the query was modified, log it
+        if sql_query != fixed_query:
+            self.logger.info("SQL query automatically modified for better type handling")
+            self.logger.debug(f"Original: {fixed_query}\nModified: {sql_query}")
+        
+        return True, "SQL query is safe"
     
     def _execute_sql_query(self, sql_query: str) -> Tuple[List[Dict[str, Any]], List[str], Optional[str]]:
         """
@@ -626,4 +645,114 @@ class SQLQueryEngine:
             
         except Exception as e:
             self.logger.error(f"Error fixing SQL: {str(e)}")
-            return "", f"Error fixing SQL: {str(e)}"
+            return "", f"Error fixing SQL: {str(e)}" 
+
+    def _format_sql_results_with_query(self, user_query: str, sql_query: str, 
+                                result_data: List[Dict[str, Any]], column_names: List[str]) -> str:
+        """
+        Format SQL results into a response that includes both the SQL query and results.
+        
+        Args:
+            user_query: Original user query
+            sql_query: The SQL query that was executed
+            result_data: The query results
+            column_names: Names of the columns in the results
+            
+        Returns:
+            Formatted natural language response with SQL query included
+        """
+        # Limit result size to avoid LLM token limits
+        max_rows = 25
+        truncated = len(result_data) > max_rows
+        
+        if truncated:
+            result_sample = result_data[:max_rows]
+            truncation_message = f"\n\nNote: Results limited to {max_rows} rows out of {len(result_data)} total."
+        else:
+            result_sample = result_data
+            truncation_message = ""
+        
+        # Format results as a readable table
+        result_table = "Results:\n"
+        
+        # Format results using Polars
+        if result_sample:
+            try:
+                df = pl.DataFrame(result_sample)
+                if not df.is_empty():
+                    # Use str() for Polars DataFrames
+                    result_table += str(df) 
+                    result_table += f"\n\nTotal rows returned: {len(result_data)}{truncation_message}"
+                else:
+                    result_table = "No results returned."
+            except Exception as e:
+                self.logger.error(f"Error formatting results with Polars: {str(e)}", exc_info=True)
+                # Fallback to manual formatting
+                result_table += self._format_results_manually(result_sample, column_names)
+        else:
+            result_table = "No results returned."
+        
+        # Create the prompt for result formatting - explicitly request to include SQL
+        prompt = f"""
+        You are an expert SQL analyst helping interpret database query results.
+        
+        Original User Question: {user_query}
+        
+        SQL Query Used:
+        ```sql
+        {sql_query}
+        ```
+        
+        {result_table}
+        
+        Please format your response as follows:
+        1. First provide a clear, direct answer to the user's question based on the results
+        2. Then include the SQL query that was used
+        3. Finally provide a brief explanation of the results
+        
+        Keep your tone conversational and expressive. Make sure you explicitly include the SQL query code block in your response.
+        """
+        
+        try:
+            # Get formatted response from LLM
+            response = self.llm.query(prompt, "")
+            
+            # If the response doesn't include the SQL query, add it
+            if "```sql" not in response:
+                response = f"{response}\n\nSQL Query Used:\n```sql\n{sql_query}\n```"
+            
+            self.logger.info("Results formatted successfully with SQL query included")
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Error formatting results: {str(e)}", exc_info=True)
+            
+            # Fallback to basic formatting if LLM fails, ensuring SQL is included
+            basic_response = f"Here are the results of your query:\n\n"
+            
+            if result_data:
+                basic_response += f"Found {len(result_data)} records."
+                if truncated:
+                    basic_response += f" Showing first {max_rows}."
+                    
+                # Format a simple table
+                try:
+                    if result_sample:
+                        df = pl.DataFrame(result_sample)
+                        if not df.is_empty():
+                            basic_response += "\n\n" + str(df)
+                        else:
+                            # Manual formatting as fallback
+                            basic_response += self._format_results_manually(result_sample, column_names)
+                    else:
+                        basic_response += "\n\nNo results to display."
+                except Exception:
+                    # Ultimate fallback: manual formatting
+                    basic_response += self._format_results_manually(result_sample, column_names)
+            else:
+                basic_response += "No results found for your query."
+            
+            # Always include the SQL query in the fallback response
+            basic_response += f"\n\nSQL Query Used:\n```sql\n{sql_query}\n```"
+            
+            return basic_response
