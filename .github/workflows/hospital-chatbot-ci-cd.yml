@@ -27,6 +27,10 @@ env:
   ECR_REPOSITORY: hdc-dev-cloud
   WORKING_DIRECTORY: hospital-data-chatbot
 
+permissions:
+  id-token: write # Required for OIDC authentication
+  contents: read  # Required to checkout the repository
+
 jobs:
   test:
     name: Test
@@ -69,7 +73,7 @@ jobs:
       - name: Run linting
         run: |
           source .venv/bin/activate
-          flake8 app tests || true  # Don't fail the build if linting fails
+          flake8 app tests || true
           black --check app tests || true
           isort --check-only app tests || true
       
@@ -81,7 +85,6 @@ jobs:
       - name: Run tests
         run: |
           source .venv/bin/activate
-          # Run basic tests - modify based on your actual test setup
           pytest tests/ -v || true
         env:
           APP_ENV: dev_local
@@ -103,22 +106,6 @@ jobs:
     
     steps:
       - uses: actions/checkout@v3
-
-      - name: Verify AWS credentials
-        run: |
-            aws sts get-caller-identity
-            aws ecr describe-repositories --region ${{ env.AWS_REGION }} --max-items 1
-        env:
-            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-          mask-aws-account-id: false
       
       - name: Determine environment
         id: environment
@@ -131,14 +118,17 @@ jobs:
             echo "ENV=dev" >> $GITHUB_ENV
           fi
       
+      # OIDC Authentication with AWS
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github-actions-hospital-chatbot-${{ env.ENV }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+      
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
-      
-      - name: Create or verify ECR repository
-        run: |
-          aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }}-${{ env.ENV }} || \
-          aws ecr create-repository --repository-name ${{ env.ECR_REPOSITORY }}-${{ env.ENV }}
       
       - name: Build and push Docker image
         env:
@@ -156,7 +146,7 @@ jobs:
           
           # Tag as latest
           docker tag $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}-${{ env.ENV }}:$IMAGE_TAG \
-                     $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}-${{ env.ENV }}:latest
+                    $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}-${{ env.ENV }}:latest
           
           # Push image to ECR
           docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}-${{ env.ENV }}:$IMAGE_TAG
@@ -165,95 +155,12 @@ jobs:
           # Store image URI for next steps
           echo "IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}-${{ env.ENV }}:$IMAGE_TAG" >> $GITHUB_ENV
 
-      - name: Update ECS Service (if exists)
+      - name: Trigger ECS deployment
         run: |
-            # Try to update the ECS service if it exists
-            SERVICE_EXISTS=$(aws ecs list-services --cluster hospital-chatbot-${{ env.ENV }} | grep hospital-chatbot-service | wc -l)
+          # Update ECS service with new task definition revision
+          aws ecs update-service \
+            --cluster hospital-chatbot-${{ env.ENV }} \
+            --service hospital-chatbot-service \
+            --force-new-deployment
             
-            if [ "$SERVICE_EXISTS" -gt 0 ]; then
-              # Define container environment variables based on current environment
-              if [ "${{ env.ENV }}" = "prod" ]; then
-                DB_HOST="${{ secrets.DB_HOST_PROD }}"
-                DB_PASSWORD="${{ secrets.DB_PASSWORD_PROD }}"
-                DB_NAME="hospital_data_prod"
-                DB_USER="prod_user"
-              else
-                DB_HOST="${{ secrets.DB_HOST_DEV }}"
-                DB_PASSWORD="${{ secrets.DB_PASSWORD_DEV }}"
-                DB_NAME="hospital_data_dev"
-                DB_USER="dev_user"
-              fi
-              
-              # Create container definition JSON and save to a file
-              cat > container-def.json << EOF
-              {
-                "containerDefinitions": [
-                  {
-                    "name": "hospital-chatbot",
-                    "image": "${{ env.IMAGE_URI }}",
-                    "essential": true,
-                    "environment": [
-                      {"name": "APP_ENV", "value": "${{ env.ENV }}"},
-                      {"name": "DB_HOST", "value": "$DB_HOST"},
-                      {"name": "DB_PORT", "value": "5432"},
-                      {"name": "DB_NAME", "value": "$DB_NAME"},
-                      {"name": "DB_USER", "value": "$DB_USER"},
-                      {"name": "BEDROCK_MODEL_ID", "value": "anthropic.claude-3-sonnet-20240229-v1:0"}
-                    ],
-                    "secrets": [
-                      {"name": "DB_PASSWORD", "valueFrom": "/${{ env.ECR_REPOSITORY }}/${{ env.ENV }}/db-password"}
-                    ],
-                    "portMappings": [
-                      {
-                        "containerPort": 8080,
-                        "hostPort": 8080,
-                        "protocol": "tcp"
-                      }
-                    ],
-                    "logConfiguration": {
-                      "logDriver": "awslogs",
-                      "options": {
-                        "awslogs-group": "/ecs/hospital-chatbot-${{ env.ENV }}",
-                        "awslogs-region": "${{ env.AWS_REGION }}",
-                        "awslogs-stream-prefix": "ecs"
-                      }
-                    }
-                  }
-                ]
-              }
-              EOF
-              
-              # Store the parameter for the password
-              aws ssm put-parameter \
-                --name "/${{ env.ECR_REPOSITORY }}/${{ env.ENV }}/db-password" \
-                --type "SecureString" \
-                --value "$DB_PASSWORD" \
-                --overwrite
-              
-              # Update ECS task definition using the file
-              aws ecs register-task-definition \
-                --family hospital-chatbot-${{ env.ENV }} \
-                --cpu 1024 \
-                --memory 2048 \
-                --network-mode awsvpc \
-                --requires-compatibilities FARGATE \
-                --execution-role-arn arn:aws:iam::$(aws sts get-caller-identity --query 'Account' --output text):role/ecsTaskExecutionRole \
-                --cli-input-json file://container-def.json
-              
-              # Update service to use new task definition
-              aws ecs update-service \
-                --cluster hospital-chatbot-${{ env.ENV }} \
-                --service hospital-chatbot-service \
-                --task-definition hospital-chatbot-${{ env.ENV }} \
-                --force-new-deployment
-                
-              echo "ECS service update initiated"
-            else
-              echo "ECS service not found. If you want to deploy to ECS, make sure the ECS cluster and service are created first."
-              
-              # Provide instructions on how to create ECS resources
-              echo "To create ECS resources, you can run:"
-              echo "1. Create a cluster: aws ecs create-cluster --cluster-name hospital-chatbot-${{ env.ENV }}"
-              echo "2. Create a service: [Additional service creation steps]"
-            fi
-  
+          echo "ECS deployment triggered successfully"

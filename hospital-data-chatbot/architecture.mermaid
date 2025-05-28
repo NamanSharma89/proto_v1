@@ -1,0 +1,48 @@
+graph TB
+    subgraph "Frontend Layer"
+        A[Open WebUI] --> B[Nginx/Load Balancer]
+    end
+    
+    subgraph "API Gateway Layer"
+        B --> C[Kong/Traefik API Gateway]
+        C --> D[Rate Limiter/Auth]
+    end
+    
+    subgraph "Application Layer"
+        D --> E[FastAPI Cluster]
+        E --> F[Query Router]
+        F --> G[SQL Engine]
+        F --> H[Chat Engine]
+        F --> I[Analytics Engine]
+    end
+    
+    subgraph "MCP Context Layer"
+        G --> J[MCP Context Manager]
+        H --> J
+        I --> J
+        J --> K[MCP PostgreSQL Primary]
+        K --> L[MCP PostgreSQL Replica 1]
+        K --> M[MCP PostgreSQL Replica 2]
+    end
+    
+    subgraph "Data Layer"
+        G --> N[Hospital Data PostgreSQL Primary]
+        N --> O[Read Replica 1]
+        N --> P[Read Replica 2]
+        J --> Q[Redis Context Cache]
+        J --> R[Vector DB - Pinecone/Weaviate]
+    end
+    
+    subgraph "LLM Layer"
+        G --> S[Ollama Cluster/AWS Bedrock]
+        H --> S
+        I --> S
+    end
+    
+    subgraph "Observability"
+        T[Prometheus] --> E
+        T --> K
+        T --> N
+        U[Grafana] --> T
+        V[ELK Stack] --> E
+    end

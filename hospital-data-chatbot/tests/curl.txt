@@ -1,0 +1,7 @@
+curl --request POST \
+  --url http://localhost:8080/api/db/sql-chat \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "query": "How many patients are above 65 years of age?",
+  "include_sql": true
+}'

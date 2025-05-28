@@ -1,0 +1,62 @@
+sequenceDiagram
+    participant User
+    participant OpenWebUI as OpenWebUI_Chat
+    participant API as Hospital API
+    participant MCPManager as MCP Context Manager
+    participant MCPCache as MCP Cache (Redis)
+    participant MCPDB as PostgreSQL_MCP
+    participant LLM as LLM_Model
+    participant HospitalDB as PostgreSQL_Hospital
+
+    User->>OpenWebUI: Input query
+    OpenWebUI->>API: Send query (OpenAI-compatible format)
+    
+    %% MCP Context Flow
+    API->>MCPManager: Create/Get session
+    MCPManager->>MCPDB: Store session & query
+    
+    API->>MCPManager: Check for similar queries
+    MCPManager->>MCPCache: Check Redis cache
+    
+    alt Cache Hit
+        MCPCache-->>MCPManager: Return cached result
+        MCPManager-->>API: Return cached response
+        API-->>OpenWebUI: Send cached results
+        OpenWebUI-->>User: Display results
+    else Cache Miss
+        MCPManager->>MCPDB: Search similar patterns
+        MCPDB-->>MCPManager: Return patterns/context
+        
+        API->>MCPManager: Get relevant context
+        MCPManager->>MCPDB: Retrieve context entries
+        MCPDB-->>MCPManager: Return context
+        
+        %% LLM Processing with Context
+        API->>LLM: Send query + context + patterns
+        LLM->>LLM: Convert query to SQL
+        LLM-->>API: Return SQL command
+        
+        %% Store SQL in MCP
+        API->>MCPManager: Store generated SQL
+        MCPManager->>MCPDB: Save SQL pattern
+        
+        %% Execute SQL
+        API->>HospitalDB: Execute SQL command
+        HospitalDB-->>API: Return results
+        
+        %% Cache Results
+        API->>MCPManager: Cache query results
+        MCPManager->>MCPCache: Store in Redis
+        MCPManager->>MCPDB: Update patterns & stats
+        
+        %% Format Response
+        API->>LLM: Format results for user
+        LLM-->>API: Return formatted response
+        
+        %% Store Response Context
+        API->>MCPManager: Store response in context
+        MCPManager->>MCPDB: Save response entry
+        
+        API-->>OpenWebUI: Send formatted results
+        OpenWebUI-->>User: Display results
+    end
