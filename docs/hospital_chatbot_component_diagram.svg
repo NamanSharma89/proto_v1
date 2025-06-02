@@ -1,0 +1,224 @@
+<svg viewBox="0 0 1400 1000" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .component { fill: #e3f2fd; stroke: #1976d2; stroke-width: 2; }
+      .ml-component { fill: #f3e5f5; stroke: #7b1fa2; stroke-width: 2; }
+      .external { fill: #fff3e0; stroke: #e65100; stroke-width: 2; }
+      .database { fill: #e8f5e8; stroke: #388e3c; stroke-width: 2; }
+      .text { font-family: Arial, sans-serif; font-size: 12px; fill: #333; }
+      .title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #1976d2; }
+      .ml-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #7b1fa2; }
+      .ext-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #e65100; }
+      .db-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #388e3c; }
+      .arrow { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .bi-arrow { stroke: #666; stroke-width: 2; fill: none; marker-start: url(#arrowhead); marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="700" y="30" text-anchor="middle" class="title" font-size="18">Hospital Data Chatbot - Component Architecture</text>
+  
+  <!-- API Layer -->
+  <rect x="50" y="70" width="300" height="140" class="component" rx="5"/>
+  <text x="200" y="90" text-anchor="middle" class="title">API Layer (FastAPI)</text>
+  <text x="60" y="110" class="text">• Health Check (/health)</text>
+  <text x="60" y="125" class="text">• Data Stats (/api/data/stats)</text>
+  <text x="60" y="140" class="text">• Chat Endpoint (/api/chat)</text>
+  <text x="60" y="155" class="text">• SQL Chat (/api/db/sql-chat)</text>
+  <text x="60" y="170" class="text">• ML Routes (/api/ml/*)</text>
+  <text x="60" y="185" class="text">• Dev Routes (/dev/*)</text>
+  <text x="60" y="200" class="text">Files: main.py, routes.py</text>
+  
+  <!-- Core Processing Layer -->
+  <rect x="400" y="70" width="280" height="140" class="component" rx="5"/>
+  <text x="540" y="90" text-anchor="middle" class="title">Core Processing</text>
+  <text x="410" y="110" class="text">• DataProcessor</text>
+  <text x="410" y="125" class="text">• QueryEngine</text>
+  <text x="410" y="140" class="text">• SQLQueryEngine</text>
+  <text x="410" y="155" class="text">• CalculationHandler</text>
+  <text x="410" y="170" class="text">Files: data_processor.py</text>
+  <text x="410" y="185" class="text">query_engine.py, sql_query_engine.py</text>
+  <text x="410" y="200" class="text">calculation_handler.py</text>
+  
+  <!-- LLM Integration -->
+  <rect x="720" y="70" width="250" height="140" class="external" rx="5"/>
+  <text x="845" y="90" text-anchor="middle" class="ext-title">LLM Integration</text>
+  <text x="730" y="110" class="text">• AWS Bedrock (Claude)</text>
+  <text x="730" y="125" class="text">• Ollama (Local)</text>
+  <text x="730" y="140" class="text">• Text-to-SQL Generation</text>
+  <text x="730" y="155" class="text">• Response Formatting</text>
+  <text x="730" y="170" class="text">Files: llm_connector.py</text>
+  <text x="730" y="185" class="text">ollama_connector.py</text>
+  
+  <!-- ML/AI Components -->
+  <rect x="1000" y="70" width="320" height="140" class="ml-component" rx="5"/>
+  <text x="1160" y="90" text-anchor="middle" class="ml-title">ML/AI Components</text>
+  <text x="1010" y="110" class="text">• FeatureEngineering</text>
+  <text x="1010" y="125" class="text">• FeatureStore</text>
+  <text x="1010" y="140" class="text">• SageMakerIntegration</text>
+  <text x="1010" y="155" class="text">• HospitalMLModels</text>
+  <text x="1010" y="170" class="text">• MCP (Model Context Protocol)</text>
+  <text x="1010" y="185" class="text">Files: ml/* directory</text>
+  <text x="1010" y="200" class="text">feature_*.py, sagemaker_*.py</text>
+  
+  <!-- Data Storage Layer -->
+  <rect x="50" y="250" width="200" height="120" class="database" rx="5"/>
+  <text x="150" y="270" text-anchor="middle" class="db-title">Data Storage</text>
+  <text x="60" y="290" class="text">• Excel Data Source</text>
+  <text x="60" y="305" class="text">• PostgreSQL Database</text>
+  <text x="60" y="320" class="text">• patient_details table</text>
+  <text x="60" y="335" class="text">• diagnosis_details table</text>
+  <text x="60" y="350" class="text">Files: db.py</text>
+  
+  <!-- Cloud Services -->
+  <rect x="300" y="250" width="200" height="120" class="external" rx="5"/>
+  <text x="400" y="270" text-anchor="middle" class="ext-title">AWS Services</text>
+  <text x="310" y="290" class="text">• S3 (Data Storage)</text>
+  <text x="310" y="305" class="text">• Aurora PostgreSQL</text>
+  <text x="310" y="320" class="text">• SageMaker (ML)</text>
+  <text x="310" y="335" class="text">• Bedrock (LLM)</text>
+  <text x="310" y="350" class="text">Files: aws.py</text>
+  
+  <!-- Configuration & Utils -->
+  <rect x="550" y="250" width="200" height="120" class="component" rx="5"/>
+  <text x="650" y="270" text-anchor="middle" class="title">Config & Utils</text>
+  <text x="560" y="290" class="text">• AppConfig</text>
+  <text x="560" y="305" class="text">• Logging Setup</text>
+  <text x="560" y="320" class="text">• Environment Management</text>
+  <text x="560" y="335" class="text">Files: settings.py</text>
+  <text x="560" y="350" class="text">logging.py</text>
+  
+  <!-- Feature Engineering Pipeline -->
+  <rect x="800" y="250" width="250" height="120" class="ml-component" rx="5"/>
+  <text x="925" y="270" text-anchor="middle" class="ml-title">Feature Engineering</text>
+  <text x="810" y="290" class="text">• Patient Risk Features</text>
+  <text x="810" y="305" class="text">• Diagnosis Clustering</text>
+  <text x="810" y="320" class="text">• Readmission Prediction</text>
+  <text x="810" y="335" class="text">Files: feature_engineering.py</text>
+  <text x="810" y="350" class="text">feature_store.py</text>
+  
+  <!-- Model Training & Deployment -->
+  <rect x="1100" y="250" width="250" height="120" class="ml-component" rx="5"/>
+  <text x="1225" y="270" text-anchor="middle" class="ml-title">Model Operations</text>
+  <text x="1110" y="290" class="text">• Training Scripts</text>
+  <text x="1110" y="305" class="text">• Model Deployment</text>
+  <text x="1110" y="320" class="text">• Batch Prediction</text>
+  <text x="1110" y="335" class="text">Files: train_deploy_model.py</text>
+  <text x="1110" y="350" class="text">test_ml_api.py</text>
+  
+  <!-- Data Flow Layer -->
+  <rect x="50" y="400" width="600" height="100" class="component" rx="5"/>
+  <text x="350" y="420" text-anchor="middle" class="title">Data Processing Pipeline</text>
+  <text x="60" y="440" class="text">Excel → DataProcessor → Sanitization → Validation → PostgreSQL</text>
+  <text x="60" y="455" class="text">• Column name standardization (snake_case)</text>
+  <text x="60" y="470" class="text">• Data type conversion and validation</text>
+  <text x="60" y="485" class="text">• Referential integrity checks</text>
+  
+  <!-- Query Processing Flow -->
+  <rect x="700" y="400" width="650" height="100" class="component" rx="5"/>
+  <text x="1025" y="420" text-anchor="middle" class="title">Query Processing Flow</text>
+  <text x="710" y="440" class="text">User Query → LLM (Text-to-SQL) → SQL Validation → DB Execution → LLM (Format Results)</text>
+  <text x="710" y="455" class="text">• Natural language understanding</text>
+  <text x="710" y="470" class="text">• SQL safety validation</text>
+  <text x="710" y="485" class="text">• Result formatting and explanation</text>
+  
+  <!-- ML Prediction Flow -->
+  <rect x="50" y="530" width="1300" height="100" class="ml-component" rx="5"/>
+  <text x="700" y="550" text-anchor="middle" class="ml-title">ML Prediction Pipeline</text>
+  <text x="60" y="570" class="text">Patient Data → Feature Engineering → Feature Store → SageMaker Models → Risk Predictions</text>
+  <text x="60" y="585" class="text">• Readmission risk prediction • Patient risk stratification • Diagnosis clustering</text>
+  <text x="60" y="600" class="text">• Model Context Protocol (MCP) for standardized ML API</text>
+  <text x="60" y="615" class="text">Files: hospital_ml_models.py, mcp/*.py</text>
+  
+  <!-- Environment Configurations -->
+  <rect x="50" y="660" width="300" height="120" class="component" rx="5"/>
+  <text x="200" y="680" text-anchor="middle" class="title">Environment Support</text>
+  <text x="60" y="700" class="text">• dev_local (Local PostgreSQL)</text>
+  <text x="60" y="715" class="text">• dev-cloud (AWS Aurora)</text>
+  <text x="60" y="730" class="text">• stage (Staging environment)</text>
+  <text x="60" y="745" class="text">• prod (Production)</text>
+  <text x="60" y="760" class="text">Files: settings.py</text>
+  
+  <!-- Security & Monitoring -->
+  <rect x="400" y="660" width="250" height="120" class="component" rx="5"/>
+  <text x="525" y="680" text-anchor="middle" class="title">Security & Monitoring</text>
+  <text x="410" y="700" class="text">• API Key Authentication</text>
+  <text x="410" y="715" class="text">• SQL Injection Prevention</text>
+  <text x="410" y="730" class="text">• Comprehensive Logging</text>
+  <text x="410" y="745" class="text">• Health Check Endpoints</text>
+  <text x="410" y="760" class="text">Files: middleware.py</text>
+  
+  <!-- Deployment & DevOps -->
+  <rect x="700" y="660" width="300" height="120" class="external" rx="5"/>
+  <text x="850" y="680" text-anchor="middle" class="ext-title">Deployment & DevOps</text>
+  <text x="710" y="700" class="text">• Automated ML Training</text>
+  <text x="710" y="715" class="text">• Nightly Data Processing</text>
+  <text x="710" y="730" class="text">• Model Performance Testing</text>
+  <text x="710" y="745" class="text">Files: nightly_deploy.py</text>
+  <text x="710" y="760" class="text">scripts/*.py</text>
+  
+  <!-- Development Tools -->
+  <rect x="1050" y="660" width="300" height="120" class="component" rx="5"/>
+  <text x="1200" y="680" text-anchor="middle" class="title">Development Tools</text>
+  <text x="1060" y="700" class="text">• Database Reset (/dev/reset-tables)</text>
+  <text x="1060" y="715" class="text">• Configuration Viewer</text>
+  <text x="1060" y="730" class="text">• ML API Testing Scripts</text>
+  <text x="1060" y="745" class="text">Files: dev_routes.py</text>
+  <text x="1060" y="760" class="text">test_ml_api.py</text>
+  
+  <!-- Data Flow Arrows -->
+  <!-- API to Core Processing -->
+  <line x1="350" y1="140" x2="400" y2="140" class="arrow"/>
+  
+  <!-- Core Processing to LLM -->
+  <line x1="680" y1="140" x2="720" y2="140" class="bi-arrow"/>
+  
+  <!-- Core Processing to ML -->
+  <line x1="680" y1="120" x2="1000" y2="120" class="arrow"/>
+  
+  <!-- API to Database -->
+  <line x1="200" y1="210" x2="150" y2="250" class="bi-arrow"/>
+  
+  <!-- Core Processing to AWS -->
+  <line x1="540" y1="210" x2="400" y2="250" class="bi-arrow"/>
+  
+  <!-- ML to Feature Engineering -->
+  <line x1="1160" y1="210" x2="925" y2="250" class="bi-arrow"/>
+  
+  <!-- ML to Model Operations -->
+  <line x1="1160" y1="210" x2="1225" y2="250" class="bi-arrow"/>
+  
+  <!-- Core to Config -->
+  <line x1="540" y1="210" x2="650" y2="250" class="arrow"/>
+  
+  <!-- Legend -->
+  <rect x="50" y="820" width="1300" height="150" fill="none" stroke="#ccc" stroke-width="1" rx="5"/>
+  <text x="700" y="840" text-anchor="middle" class="title" font-size="16">Component Legend</text>
+  
+  <rect x="80" y="860" width="20" height="15" class="component"/>
+  <text x="110" y="872" class="text">Core Application Components</text>
+  
+  <rect x="300" y="860" width="20" height="15" class="ml-component"/>
+  <text x="330" y="872" class="text">ML/AI Components</text>
+  
+  <rect x="500" y="860" width="20" height="15" class="external"/>
+  <text x="530" y="872" class="text">External Services & APIs</text>
+  
+  <rect x="720" y="860" width="20" height="15" class="database"/>
+  <text x="750" y="872" class="text">Data Storage</text>
+  
+  <line x1="80" y1="890" x2="120" y2="890" class="arrow"/>
+  <text x="130" y="895" class="text">Data Flow</text>
+  
+  <line x1="220" y1="890" x2="260" y2="890" class="bi-arrow"/>
+  <text x="270" y="895" class="text">Bidirectional Communication</text>
+  
+  <!-- Key Features -->
+  <text x="80" y="920" class="text" font-weight="bold">Key Features:</text>
+  <text x="80" y="935" class="text">• Multi-environment support (local, cloud, staging, production)</text>
+  <text x="80" y="950" class="text">• Natural language to SQL conversion with safety validation</text>
+  <text x="80" y="965" class="text">• Advanced ML pipeline with SageMaker integration and MCP protocol</text>
+</svg>
