@@ -70,8 +70,6 @@ module "storage" {
   tags = local.common_tags
 }
 
-# Update this section in deploy/terraform/main.tf
-
 # Create the SSM Parameter for the database password
 resource "aws_ssm_parameter" "db_password" {
   name        = "/${var.project_name}/${var.environment}/db-password"

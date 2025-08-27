@@ -1,0 +1,80 @@
+flowchart TD
+   A[Start terraform-infra-manager.sh] --> B[Parse Command Line Arguments]
+   B --> C{Command Specified?}
+   C -->|No| D[Show Usage & Exit]
+   C -->|Yes| E[Setup AWS Profile]
+   
+   E --> F[Verify AWS Credentials]
+   F -->|Failed| G[Exit with Error]
+   F -->|Success| H[Get AWS Account ID & Region]
+   
+   H --> I[Generate Resource Names]
+   I --> J{Command = 'params'?}
+   J -->|Yes| K[Manage SSM Parameters]
+   K --> L[Exit Successfully]
+   
+   J -->|No| M[Check S3 Bucket Exists]
+   M -->|No| N{Create Bucket?}
+   N -->|No| O[Exit - Cannot Proceed]
+   N -->|Yes| P[Create S3 Bucket & Enable Versioning]
+   P --> Q[Check DynamoDB Table]
+   M -->|Yes| Q[Check DynamoDB Table]
+   
+   Q -->|No| R{Create Table?}
+   R -->|No| S[Warn - No State Locking]
+   R -->|Yes| T[Create DynamoDB Table]
+   T --> U[Generate Backend Config]
+   S --> U
+   Q -->|Yes| U
+   
+   U --> V{Command needs DB password?}
+   V -->|Yes| W[Check SSM Parameter Exists]
+   W -->|No| X{Create Parameter?}
+   X -->|No| Y[Exit - Cannot Proceed]
+   X -->|Yes| Z[Create DB Password Parameter]
+   Z --> AA[Change to Terraform Directory]
+   W -->|Yes| AA
+   V -->|No| AA
+   
+   AA --> BB[Set Terraform Variables]
+   BB --> CC{Command Type?}
+   
+   CC -->|init| DD[Run terraform init]
+   CC -->|plan| EE[Warn if no DB password & Run terraform plan]
+   CC -->|apply| FF[Run terraform apply]
+   CC -->|destroy| GG{Auto-approve?}
+   CC -->|output| HH[Run terraform output]
+   CC -->|validate| II[Run terraform validate]
+   CC -->|workspace| JJ[Manage Terraform Workspace]
+   CC -->|fmt| KK[Run terraform fmt]
+   CC -->|all| LL[Full Deployment Pipeline]
+   
+   GG -->|No| MM[Confirm Destruction]
+   MM -->|yes| NN[Run terraform destroy]
+   MM -->|No| OO[Exit - Destruction Aborted]
+   GG -->|Yes| NN
+   
+   LL --> PP[Run terraform init]
+   PP --> QQ[Run terraform validate]
+   QQ --> RR[Run terraform plan]
+   RR --> SS[Run terraform apply]
+   SS --> TT[Show terraform output]
+   
+   DD --> UU[Operation Complete]
+   EE --> UU
+   FF --> UU
+   NN --> UU
+   HH --> UU
+   II --> UU
+   JJ --> UU
+   KK --> UU
+   TT --> UU
+   O --> VV[Exit with Error]
+   Y --> VV
+   G --> VV
+   
+   style A fill:#e1f5fe
+   style UU fill:#c8e6c9
+   style VV fill:#ffcdd2
+   style K fill:#fff3e0
+   style LL fill:#f3e5f5
