@@ -1,26 +1,30 @@
 name: Hospital Data Chatbot CI/CD
 
 on:
-  push:
-    branches: [main, develop]
-    paths:
-      - 'hospital-data-chatbot/**'
-      - '.github/workflows/hospital-chatbot-ci-cd.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'hospital-data-chatbot/**'
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - staging
-          - prod
+  workflow_dispatch: # manual only — all automatic triggers temporarily disabled
+
+# DISABLED TRIGGERS:
+# on:
+#   push:
+#     branches: [main, develop]
+#     paths:
+#       - 'hospital-data-chatbot/**'
+#       - '.github/workflows/hospital-chatbot-ci-cd.yml'
+#   pull_request:
+#     branches: [main]
+#     paths:
+#       - 'hospital-data-chatbot/**'
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         description: 'Environment to deploy to'
+#         required: true
+#         default: 'dev'
+#         type: choice
+#         options:
+#           - dev
+#           - staging
+#           - prod
 
 env:
   AWS_REGION: ap-south-1

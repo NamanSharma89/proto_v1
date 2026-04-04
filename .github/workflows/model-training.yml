@@ -2,26 +2,30 @@
 name: ML Model Training and Deployment
 
 on:
-  workflow_dispatch:
-    inputs:
-      model_type:
-        description: 'Type of model to train'
-        required: true
-        default: 'readmission_risk'
-        type: choice
-        options:
-          - readmission_risk
-          - patient_risk
-          - diagnosis_cluster
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'dev-cloud'
-        type: choice
-        options:
-          - dev-cloud
-          - stage
-          - prod
+  workflow_dispatch: # manual only — all automatic triggers temporarily disabled
+
+# DISABLED TRIGGERS:
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       model_type:
+#         description: 'Type of model to train'
+#         required: true
+#         default: 'readmission_risk'
+#         type: choice
+#         options:
+#           - readmission_risk
+#           - patient_risk
+#           - diagnosis_cluster
+#       environment:
+#         description: 'Environment to deploy to'
+#         required: true
+#         default: 'dev-cloud'
+#         type: choice
+#         options:
+#           - dev-cloud
+#           - stage
+#           - prod
 
 env:
   AWS_REGION: ap-south-1
